@@ -12,3 +12,6 @@ dependencies:
       - pydantic-settings
       - python-dotenv
       - pytest
+      - pyjwt
+      - "pwdlib[argon2]"
+      - python-multipart
