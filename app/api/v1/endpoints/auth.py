@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -9,14 +8,24 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import (
     create_access_token,
+    create_email_signup_verification_token,
     create_refresh_token,
+    generate_email_code,
     get_current_active_user,
     hash_password,
     hash_refresh_token,
+    hash_text,
+    verify_email_signup_verification_token,
     verify_password,
 )
+from app.models.email_verification import EmailVerification
 from app.models.member import Member
 from app.models.refresh_token import RefreshToken
+from app.repositories.email_verification_repository import (
+    create_email_verification,
+    get_latest_pending_verification,
+    update_email_verification,
+)
 from app.repositories.member_repository import (
     create_member,
     get_member_by_email,
@@ -31,12 +40,84 @@ from app.schemas.auth import (
     AccessTokenResponse,
     LoginTokenResponse,
     RefreshTokenRequest,
+    SendEmailCodeRequest,
+    VerifyEmailCodeRequest,
+    VerifyEmailCodeResponse,
 )
 from app.schemas.member import MemberResponse, MemberSignupRequest
+from app.services.mail_service import send_signup_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-REFRESH_TOKEN_EXPIRE_DAYS = 14
+
+@router.post("/email/send-code")
+def send_signup_email_code(
+    payload: SendEmailCodeRequest,
+    db: Session = Depends(get_db),
+):
+    existing_member = get_member_by_email(db, payload.email)
+    if existing_member:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 가입된 이메일입니다.",
+        )
+
+    code = generate_email_code()
+
+    verification = EmailVerification(
+        email=payload.email,
+        purpose="SIGNUP",
+        code_hash=hash_text(code),
+        expires_at=(datetime.now(timezone.utc) + timedelta(
+            minutes=settings.email_code_expire_minutes
+        )).replace(tzinfo=None),
+        verified_at=None,
+    )
+    create_email_verification(db, verification)
+
+    send_signup_verification_email(payload.email, code)
+
+    return {"message": "인증코드를 이메일로 발송했습니다."}
+
+
+@router.post("/email/verify-code", response_model=VerifyEmailCodeResponse)
+def verify_signup_email_code(
+    payload: VerifyEmailCodeRequest,
+    db: Session = Depends(get_db),
+):
+    verification = get_latest_pending_verification(
+        db,
+        payload.email,
+        "SIGNUP",
+    )
+
+    if not verification:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효한 인증 요청이 없습니다.",
+        )
+
+    if verification.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="인증코드가 만료되었습니다.",
+        )
+
+    if verification.code_hash != hash_text(payload.code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="인증코드가 올바르지 않습니다.",
+        )
+
+    verification.verified_at = datetime.utcnow()
+    update_email_verification(db, verification)
+
+    verification_token = create_email_signup_verification_token(payload.email)
+
+    return {
+        "message": "이메일 인증이 완료되었습니다.",
+        "verification_token": verification_token,
+    }
 
 
 @router.post("/signup", response_model=MemberResponse, status_code=201)
@@ -49,6 +130,15 @@ def signup(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="이미 가입된 이메일입니다.",
+        )
+
+    if not verify_email_signup_verification_token(
+        payload.verification_token,
+        payload.email,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이메일 인증이 완료되지 않았습니다.",
         )
 
     member = Member(
@@ -67,7 +157,7 @@ def signup(
 
 @router.post("/login", response_model=LoginTokenResponse)
 def login_for_access_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
     member = get_member_by_email(db, form_data.username)
@@ -104,12 +194,9 @@ def login_for_access_token(
             detail="사용할 수 없는 계정입니다.",
         )
 
-    access_token_expires = timedelta(
-        minutes=settings.access_token_expire_minutes
-    )
     access_token = create_access_token(
         data={"sub": member.email},
-        expires_delta=access_token_expires,
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
     refresh_token = create_refresh_token()
@@ -118,12 +205,14 @@ def login_for_access_token(
     refresh_token_row = RefreshToken(
         member_id=member.id,
         token_hash=refresh_token_hash,
-        expires_at=(datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)).replace(tzinfo=None),
+        expires_at=(datetime.now(timezone.utc) + timedelta(
+            days=settings.refresh_token_expire_days
+        )).replace(tzinfo=None),
         revoked_at=None,
     )
     create_refresh_token_row(db, refresh_token_row)
 
-    member.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    member.last_login_at = datetime.utcnow()
     update_member(db, member)
 
     return {
@@ -166,12 +255,9 @@ def refresh_access_token(
             detail="사용할 수 없는 계정입니다.",
         )
 
-    access_token_expires = timedelta(
-        minutes=settings.access_token_expire_minutes
-    )
     access_token = create_access_token(
         data={"sub": member.email},
-        expires_delta=access_token_expires,
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
     return {
@@ -197,6 +283,6 @@ def logout(
 
 @router.get("/me", response_model=MemberResponse)
 def read_users_me(
-    current_user: Annotated[Member, Depends(get_current_active_user)],
+    current_user: Member = Depends(get_current_active_user),
 ):
     return current_user

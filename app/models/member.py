@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Integer, String
 from app.models.base import BaseModel
 
 
@@ -7,8 +7,7 @@ class Member(BaseModel):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
-
-    password = Column(String(255), nullable=True)
+    password = Column(String(255), nullable=True)  # 해시 저장
 
     role = Column(String(20), nullable=False, default="USER")
     social_type = Column(String(20), nullable=False, default="LOCAL")

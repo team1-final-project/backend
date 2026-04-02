@@ -7,6 +7,7 @@ class MemberSignupRequest(BaseModel):
     password: str
     name: str
     phone: str | None = None
+    verification_token: str
 
 
 class MemberResponse(BaseModel):

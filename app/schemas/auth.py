@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
 class LoginTokenResponse(BaseModel):
@@ -14,3 +14,17 @@ class RefreshTokenRequest(BaseModel):
 class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+
+class SendEmailCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
+class VerifyEmailCodeResponse(BaseModel):
+    message: str
+    verification_token: str

@@ -16,13 +16,19 @@ class Settings(BaseSettings):
 
     database_url: str = "mysql+pymysql://root:1234@127.0.0.1:3306/stocker"
 
-    jwt_secret_key: str = "change-this-to-a-long-random-secret-key"
+    jwt_secret_key: str = "change-this"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 14
 
-    admin_username: str = "admin"
-    admin_password: str = "admin1234"
-    admin_full_name: str = "Stocker Admin"
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+
+    email_code_expire_minutes: int = 10
+    email_signup_token_expire_minutes: int = 20
 
     model_config = SettingsConfigDict(
         env_file=".env",
