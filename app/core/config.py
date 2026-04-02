@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     email_code_expire_minutes: int = 10
     email_signup_token_expire_minutes: int = 20
 
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+    frontend_google_callback_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,

@@ -6,8 +6,15 @@ def get_member_by_email(db: Session, email: str) -> Member | None:
     return db.query(Member).filter(Member.email == email).first()
 
 
-def get_member_by_social_id(db: Session, social_id: str) -> Member | None:
-    return db.query(Member).filter(Member.social_id == social_id).first()
+def get_member_by_social(db: Session, social_type: str, social_id: str) -> Member | None:
+    return (
+        db.query(Member)
+        .filter(
+            Member.social_type == social_type,
+            Member.social_id == social_id,
+        )
+        .first()
+    )
 
 
 def create_member(db: Session, member: Member) -> Member:
