@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     kakao_redirect_uri: str = ""
     frontend_kakao_callback_url: str = ""
 
+    naver_client_id: str = ""
+    naver_client_secret: str = ""
+    naver_redirect_uri: str = ""
+    frontend_naver_callback_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,

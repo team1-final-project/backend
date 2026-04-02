@@ -15,6 +15,8 @@ from app.core.database import get_db
 from app.models.member import Member
 from app.repositories.member_repository import get_member_by_email
 
+from secrets import token_urlsafe
+
 password_hash = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -86,6 +88,9 @@ def verify_email_signup_verification_token(token: str, email: str) -> bool:
         )
     except InvalidTokenError:
         return False
+    
+def create_oauth_state() -> str:
+    return token_urlsafe(32)
 
 
 async def get_current_user(
