@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     google_redirect_uri: str = ""
     frontend_google_callback_url: str = ""
 
+    kakao_rest_api_key: str = ""
+    kakao_client_secret: str = ""
+    kakao_redirect_uri: str = ""
+    frontend_kakao_callback_url: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
