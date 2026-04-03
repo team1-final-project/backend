@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -53,6 +53,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/email/send-code")
 def send_signup_email_code(
     payload: SendEmailCodeRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     existing_member = get_member_by_email(db, payload.email)
@@ -65,7 +66,7 @@ def send_signup_email_code(
     code = generate_email_code()
 
     verification = EmailVerification(
-        email=payload.email,
+        email=payload.email.strip().lower(),
         purpose="SIGNUP",
         code_hash=hash_text(code),
         expires_at=(datetime.now(timezone.utc) + timedelta(
@@ -75,9 +76,13 @@ def send_signup_email_code(
     )
     create_email_verification(db, verification)
 
-    send_signup_verification_email(payload.email, code)
+    background_tasks.add_task(
+        send_signup_verification_email,
+        payload.email.strip().lower(),
+        code,
+    )
 
-    return {"message": "인증코드를 이메일로 발송했습니다."}
+    return {"message": "인증코드 발송을 요청했습니다."}
 
 
 @router.post("/email/verify-code", response_model=VerifyEmailCodeResponse)

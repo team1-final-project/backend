@@ -23,11 +23,12 @@ class Settings(BaseSettings):
 
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 465
+    smtp_sender_name: str = "Stock+er"
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
 
-    email_code_expire_minutes: int = 10
+    email_code_expire_minutes: int = 5
     email_signup_token_expire_minutes: int = 20
 
     google_client_id: str = ""

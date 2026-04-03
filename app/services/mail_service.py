@@ -1,18 +1,18 @@
 import smtplib
 from email.message import EmailMessage
+from email.utils import formataddr
 
 from app.core.config import settings
 
 
 def send_signup_verification_email(to_email: str, code: str) -> None:
     message = EmailMessage()
-    message["Subject"] = "[Stocker] 이메일 인증코드"
-    message["From"] = settings.smtp_from_email or settings.smtp_username
+    message["Subject"] = "[Stock+er] 이메일 인증코드"
+    message["From"] = formataddr(("Stock+er", settings.smtp_from_email or settings.smtp_username))
     message["To"] = to_email
-    message.set_content(
-        f"""안녕하세요.
 
-Stocker 이메일 인증코드는 아래와 같습니다.
+    message.set_content(
+        f"""Stock+er 이메일 인증코드는 아래와 같습니다.
 
 인증코드: {code}
 
