@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+from app.core.timezone import now_kst
 from urllib.parse import urlencode
 
 import httpx
@@ -138,15 +139,12 @@ async def naver_callback(
     refresh_token_row = RefreshToken(
         member_id=member.id,
         token_hash=refresh_token_hash,
-        expires_at=(
-            datetime.now(timezone.utc)
-            + timedelta(days=settings.refresh_token_expire_days)
-        ).replace(tzinfo=None),
+        expires_at=now_kst() + timedelta(days=settings.refresh_token_expire_days),
         revoked_at=None,
     )
     create_refresh_token_row(db, refresh_token_row)
 
-    member.last_login_at = datetime.utcnow()
+    member.last_login_at = now_kst()
     update_member(db, member)
 
     redirect_params = urlencode(

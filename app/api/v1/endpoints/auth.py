@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+from app.core.timezone import now_kst
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
@@ -69,9 +70,7 @@ def send_signup_email_code(
         email=payload.email.strip().lower(),
         purpose="SIGNUP",
         code_hash=hash_text(code),
-        expires_at=(datetime.now(timezone.utc) + timedelta(
-            minutes=settings.email_code_expire_minutes
-        )).replace(tzinfo=None),
+        expires_at=now_kst() + timedelta(minutes=settings.email_code_expire_minutes),
         verified_at=None,
     )
     create_email_verification(db, verification)
@@ -102,7 +101,7 @@ def verify_signup_email_code(
             detail="유효한 인증 요청이 없습니다.",
         )
 
-    if verification.expires_at < datetime.utcnow():
+    if verification.expires_at < now_kst():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="인증코드가 만료되었습니다.",
@@ -114,7 +113,7 @@ def verify_signup_email_code(
             detail="인증코드가 올바르지 않습니다.",
         )
 
-    verification.verified_at = datetime.utcnow()
+    verification.verified_at = now_kst()
     update_email_verification(db, verification)
 
     verification_token = create_email_signup_verification_token(payload.email)
@@ -210,14 +209,12 @@ def login_for_access_token(
     refresh_token_row = RefreshToken(
         member_id=member.id,
         token_hash=refresh_token_hash,
-        expires_at=(datetime.now(timezone.utc) + timedelta(
-            days=settings.refresh_token_expire_days
-        )).replace(tzinfo=None),
+        expires_at=now_kst() + timedelta(days=settings.refresh_token_expire_days),
         revoked_at=None,
     )
     create_refresh_token_row(db, refresh_token_row)
 
-    member.last_login_at = datetime.utcnow()
+    member.last_login_at = now_kst()
     update_member(db, member)
 
     return {
@@ -247,7 +244,7 @@ def refresh_access_token(
             detail="이미 만료된 리프레시 토큰입니다.",
         )
 
-    if token_row.expires_at < datetime.utcnow():
+    if token_row.expires_at < now_kst():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="리프레시 토큰이 만료되었습니다.",
@@ -280,7 +277,7 @@ def logout(
     token_row = get_refresh_token_by_hash(db, token_hash)
 
     if token_row and token_row.revoked_at is None:
-        token_row.revoked_at = datetime.utcnow()
+        token_row.revoked_at = now_kst()
         update_refresh_token(db, token_row)
 
     return {"message": "로그아웃되었습니다."}
