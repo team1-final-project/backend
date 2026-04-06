@@ -17,3 +17,4 @@ dependencies:
       - python-multipart
       - email-validator
       - httpx
+      - requests
