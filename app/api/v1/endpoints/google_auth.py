@@ -15,6 +15,7 @@ from app.core.security import (
     hash_refresh_token,
 )
 from app.models.member import Member
+from app.core.enums import MemberRole, MemberStatus, SocialType
 from app.models.refresh_token import RefreshToken
 from app.repositories.member_repository import (
     create_member,
@@ -90,13 +91,13 @@ async def google_callback(
     if not social_id or not email:
         raise HTTPException(status_code=400, detail="구글 사용자 정보가 올바르지 않습니다.")
 
-    member = get_member_by_social(db, "GOOGLE", social_id)
+    member = get_member_by_social(db, SocialType.GOOGLE, social_id)
 
     if not member:
         member = get_member_by_email(db, email)
 
         if member:
-            if member.social_type == "LOCAL":
+            if member.social_type == SocialType.LOCAL:
                 raise HTTPException(
                     status_code=409,
                     detail="이미 일반 회원가입된 이메일입니다. 일반 로그인으로 이용해주세요.",
@@ -105,12 +106,12 @@ async def google_callback(
             member = Member(
                 email=email,
                 password=None,
-                role="USER",
-                social_type="GOOGLE",
+                role=MemberRole.USER,
+                social_type=SocialType.GOOGLE,
                 social_id=social_id,
                 name=name,
                 phone=None,
-                status="ACTIVE",
+                status=MemberStatus.ACTIVE,
             )
             member = create_member(db, member)
 

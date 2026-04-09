@@ -14,6 +14,7 @@ from app.core.security import (
     create_refresh_token,
     hash_refresh_token,
 )
+from app.core.enums import MemberRole, MemberStatus, SocialType
 from app.models.member import Member
 from app.models.refresh_token import RefreshToken
 from app.repositories.member_repository import (
@@ -101,13 +102,13 @@ async def kakao_callback(
             detail="카카오 이메일 정보가 없습니다. 카카오 동의항목에서 이메일을 활성화해주세요.",
         )
 
-    member = get_member_by_social(db, "KAKAO", social_id)
+    member = get_member_by_social(db, SocialType.KAKAO, social_id)
 
     if not member:
         member = get_member_by_email(db, email)
 
         if member:
-            if member.social_type == "LOCAL":
+            if member.social_type == SocialType.LOCAL:
                 raise HTTPException(
                     status_code=409,
                     detail="이미 일반 회원가입된 이메일입니다. 일반 로그인으로 이용해주세요.",
@@ -116,12 +117,12 @@ async def kakao_callback(
             member = Member(
                 email=email,
                 password=None,
-                role="USER",
-                social_type="KAKAO",
+                role=MemberRole.USER,
+                social_type=SocialType.KAKAO,
                 social_id=social_id,
                 name=name,
                 phone=None,
-                status="ACTIVE",
+                status=MemberStatus.ACTIVE,
             )
             member = create_member(db, member)
 

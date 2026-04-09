@@ -1,12 +1,13 @@
 from sqlalchemy.orm import Session
 from app.models.member import Member
+from app.core.enums import SocialType
 
 
 def get_member_by_email(db: Session, email: str) -> Member | None:
     return db.query(Member).filter(Member.email == email).first()
 
 
-def get_member_by_social(db: Session, social_type: str, social_id: str) -> Member | None:
+def get_member_by_social(db: Session, social_type: SocialType, social_id: str) -> Member | None:
     return (
         db.query(Member)
         .filter(

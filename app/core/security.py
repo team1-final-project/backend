@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.enums import MemberStatus
 from app.models.member import Member
 from app.repositories.member_repository import get_member_by_email
 
@@ -125,6 +126,6 @@ async def get_current_user(
 async def get_current_active_user(
     current_user: Annotated[Member, Depends(get_current_user)],
 ) -> Member:
-    if current_user.status != "ACTIVE":
+    if current_user.status != MemberStatus.ACTIVE:
         raise HTTPException(status_code=403, detail="비활성화된 계정입니다.")
     return current_user

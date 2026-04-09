@@ -19,6 +19,7 @@ from app.core.security import (
     verify_email_signup_verification_token,
     verify_password,
 )
+from app.core.enums import MemberRole, MemberStatus, SocialType, VerificationPurpose
 from app.models.email_verification import EmailVerification
 from app.models.member import Member
 from app.models.refresh_token import RefreshToken
@@ -68,7 +69,7 @@ def send_signup_email_code(
 
     verification = EmailVerification(
         email=payload.email.strip().lower(),
-        purpose="SIGNUP",
+        purpose=VerificationPurpose.SIGNUP,
         code_hash=hash_text(code),
         expires_at=now_kst() + timedelta(minutes=settings.email_code_expire_minutes),
         verified_at=None,
@@ -92,7 +93,7 @@ def verify_signup_email_code(
     verification = get_latest_pending_verification(
         db,
         payload.email,
-        "SIGNUP",
+        VerificationPurpose.SIGNUP,
     )
 
     if not verification:
@@ -148,12 +149,12 @@ def signup(
     member = Member(
         email=payload.email,
         password=hash_password(payload.password),
-        role="USER",
-        social_type="LOCAL",
+        role=MemberRole.USER,
+        social_type=SocialType.LOCAL,
         social_id=None,
         name=payload.name,
         phone=payload.phone,
-        status="ACTIVE",
+        status=MemberStatus.ACTIVE,
     )
 
     return create_member(db, member)
@@ -173,7 +174,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if member.social_type != "LOCAL":
+    if member.social_type != SocialType.LOCAL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="소셜 로그인 계정입니다. 소셜 로그인을 이용해주세요.",
@@ -192,7 +193,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if member.status != "ACTIVE":
+    if member.status != MemberStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="사용할 수 없는 계정입니다.",
@@ -251,7 +252,7 @@ def refresh_access_token(
         )
 
     member = db.query(Member).filter(Member.id == token_row.member_id).first()
-    if not member or member.status != "ACTIVE":
+    if not member or member.status != MemberStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="사용할 수 없는 계정입니다.",

@@ -18,6 +18,7 @@ from app.core.security import (
     create_refresh_token,
     hash_refresh_token,
 )
+from app.core.enums import MemberRole, MemberStatus, SocialType
 from app.models.member import Member
 from app.models.refresh_token import RefreshToken
 from app.repositories.member_repository import (
@@ -104,13 +105,13 @@ async def naver_callback(
             detail="네이버 이메일 정보가 없습니다. 네이버 로그인에서 이메일 제공 설정을 확인해주세요.",
         )
 
-    member = get_member_by_social(db, "NAVER", social_id)
+    member = get_member_by_social(db, SocialType.NAVER, social_id)
 
     if not member:
         member = get_member_by_email(db, email)
 
         if member:
-            if member.social_type == "LOCAL":
+            if member.social_type == SocialType.LOCAL:
                 raise HTTPException(
                     status_code=409,
                     detail="이미 일반 회원가입된 이메일입니다. 일반 로그인을 이용해주세요.",
@@ -119,12 +120,12 @@ async def naver_callback(
             member = Member(
                 email=email,
                 password=None,
-                role="USER",
-                social_type="NAVER",
+                role=MemberRole.USER,
+                social_type=SocialType.NAVER,
                 social_id=social_id,
                 name=name,
                 phone=None,
-                status="ACTIVE",
+                status=MemberStatus.ACTIVE,
             )
             member = create_member(db, member)
 
