@@ -1,9 +1,16 @@
-# 나중에 모델 추가 시 여기서 import
 from app.models.member import Member
 from app.models.refresh_token import RefreshToken
 from app.models.email_verification import EmailVerification
-
+from app.models.category import Category
+from app.models.brand import Brand
+from app.models.catalog_product import CatalogProduct
+from app.models.product import Product
+from app.models.product_image import ProductImage
+from app.models.product_price_history import ProductPriceHistory
+from app.models.inventory_log import InventoryLog
+from app.models.cart import Cart
+from app.models.cart_item import CartItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
-from app.models.product import Product
-from app.models.inventory_log import InventoryLog
+from app.models.order_shipping import OrderShipping
+from app.models.payment import Payment

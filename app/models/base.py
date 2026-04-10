@@ -1,10 +1,15 @@
 from sqlalchemy import Column, DateTime
+from sqlalchemy.orm import declarative_mixin
+
 from app.core.database import Base
 from app.core.timezone import now_kst
 
 
-class BaseModel(Base):
-    __abstract__ = True
+@declarative_mixin
+class TimestampMixin:
+    created_at = Column(DateTime, nullable=False, default=now_kst)
+    updated_at = Column(DateTime, nullable=False, default=now_kst, onupdate=now_kst)
 
-    created_at = Column(DateTime, default=now_kst, nullable=False)
-    updated_at = Column(DateTime, default=now_kst, onupdate=now_kst, nullable=False)
+
+class BaseModel(Base, TimestampMixin):
+    __abstract__ = True
