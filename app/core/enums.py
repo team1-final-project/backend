@@ -62,19 +62,14 @@ class OrderStatus(str, Enum):
     CREATED = "CREATED"                  # 주문 생성
     PAYMENT_PENDING = "PAYMENT_PENDING"  # 결제 대기
     PAID = "PAID"                        # 결제 완료
-    PREPARING = "PREPARING"              # 상품 준비 중
-    SHIPPED = "SHIPPED"                  # 배송 중
-    DELIVERED = "DELIVERED"              # 배송 완료
     CANCELED = "CANCELED"                # 주문 취소
-    REFUNDED = "REFUNDED"                # 환불 완료
 
 
 class PaymentStatus(str, Enum):
-    READY = "READY"                      # 결제 준비
-    APPROVED = "APPROVED"                # 결제 승인
-    FAILED = "FAILED"                    # 결제 실패
-    CANCELED = "CANCELED"                # 결제 취소
-    PARTIAL_CANCELED = "PARTIAL_CANCELED"  # 부분 취소
+    READY = "READY"        # 결제 준비
+    APPROVED = "APPROVED"  # 결제 승인
+    FAILED = "FAILED"      # 결제 실패
+    CANCELED = "CANCELED"  # 결제 취소
 
 
 class PaymentProvider(str, Enum):

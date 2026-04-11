@@ -35,8 +35,6 @@ class Product(BaseModel):
     expiration_date = Column(Date, nullable=True)
 
     shipping_fee = Column(Integer, nullable=False, default=0)
-    return_shipping_fee = Column(Integer, nullable=False, default=0)
-    exchange_shipping_fee = Column(Integer, nullable=False, default=0)
 
     brand_name_snapshot = Column(String(100), nullable=True)
     catalog_name_snapshot = Column(String(255), nullable=True)
@@ -46,10 +44,4 @@ class Product(BaseModel):
     ship_from_address1 = Column(String(255), nullable=True)
     ship_from_address2 = Column(String(255), nullable=True)
 
-    return_zipcode = Column(String(10), nullable=True)
-    return_address1 = Column(String(255), nullable=True)
-    return_address2 = Column(String(255), nullable=True)
-
-    created_by = Column(Integer, ForeignKey("member.id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("member.id"), nullable=True)
     deleted_at = Column(DateTime, nullable=True)

@@ -7,7 +7,7 @@ from app.services.payment_service import PaymentService
 
 router = APIRouter(
     prefix="/api/v1/payments",
-    tags=["Payments"]
+    tags=["Payments"],
 )
 
 
