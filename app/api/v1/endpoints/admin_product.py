@@ -7,6 +7,9 @@ from app.models.member import Member
 from app.schemas.admin_product import (
     AdminProductCreateRequest,
     AdminProductCreateResponse,
+    AdminProductDetailResponse,
+    AdminProductUpdateRequest,
+    AdminProductUpdateResponse,
     ProductImageUploadResponse,
 )
 from app.services.admin_product_service import AdminProductService
@@ -24,21 +27,40 @@ def create_admin_product(
     return AdminProductService.create_product(db, current_user, payload)
 
 
-@router.post(
-    "/images/thumbnail",
-    response_model=ProductImageUploadResponse,
-)
+@router.get("/{product_code}", response_model=AdminProductDetailResponse)
+def read_admin_product_detail(
+    product_code: str,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.get_product_detail(db, current_user, product_code)
+
+
+@router.put("/{product_code}", response_model=AdminProductUpdateResponse)
+def update_admin_product(
+    product_code: str,
+    payload: AdminProductUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.update_product(db, current_user, product_code, payload)
+
+
+@router.post("/images/thumbnail", response_model=ProductImageUploadResponse)
 async def upload_product_thumbnail(
     file: UploadFile = File(...),
 ):
-    return CloudinaryService.upload_product_thumbnail(file.file, file.filename or "thumbnail")
+    return CloudinaryService.upload_product_thumbnail(
+        file.file,
+        file.filename or "thumbnail",
+    )
 
 
-@router.post(
-    "/images/detail",
-    response_model=ProductImageUploadResponse,
-)
+@router.post("/images/detail", response_model=ProductImageUploadResponse)
 async def upload_product_detail(
     file: UploadFile = File(...),
 ):
-    return CloudinaryService.upload_product_detail_image(file.file, file.filename or "detail")
+    return CloudinaryService.upload_product_detail_image(
+        file.file,
+        file.filename or "detail",
+    )
