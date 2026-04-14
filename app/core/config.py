@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     naver_redirect_uri: str = ""
     frontend_naver_callback_url: str = ""
 
+    cloudinary_cloud_name: str = ""
+    cloudinary_api_key: str = ""
+    cloudinary_api_secret: str = ""
+    cloudinary_product_folder: str = "stocker/products"
+    cloudinary_detail_folder: str = "stocker/product-details"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,

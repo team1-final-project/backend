@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     category,
     order,
     cart,
+    admin_product,
 )
 
 api_router = APIRouter()
@@ -19,3 +20,4 @@ api_router.include_router(naver_auth.router)
 api_router.include_router(category.router)
 api_router.include_router(order.router)
 api_router.include_router(cart.router)
+api_router.include_router(admin_product.router)

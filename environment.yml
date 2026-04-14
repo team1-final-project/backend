@@ -18,3 +18,4 @@ dependencies:
       - email-validator
       - httpx
       - requests
+      - cloudinary
