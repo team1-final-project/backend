@@ -19,3 +19,4 @@ dependencies:
       - httpx
       - requests
       - cloudinary
+      - selenium

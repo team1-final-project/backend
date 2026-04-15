@@ -11,6 +11,7 @@ from app.schemas.admin_product import (
     AdminProductUpdateRequest,
     AdminProductUpdateResponse,
     ProductImageUploadResponse,
+    CatalogNameResolveResponse
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
@@ -60,7 +61,25 @@ async def upload_product_thumbnail(
 async def upload_product_detail(
     file: UploadFile = File(...),
 ):
-    return CloudinaryService.upload_product_detail_image(
-        file.file,
-        file.filename or "detail",
+    return CloudinaryService.upload_product_detail_image(file.file, file.filename or "detail")
+
+@router.get(
+    "/catalogs/{external_catalog_id}/name",
+    response_model=CatalogNameResolveResponse,
+)
+def get_catalog_name(
+    external_catalog_id: str,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    AdminProductService._ensure_admin(current_user)
+
+    catalog_name = AdminProductService.resolve_catalog_name(
+        db,
+        external_catalog_id,
     )
+
+    return {
+        "external_catalog_id": external_catalog_id,
+        "catalog_name": catalog_name,
+    }

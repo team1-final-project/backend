@@ -16,6 +16,15 @@ from app.schemas.admin_product import (
     AdminProductUpdateRequest,
 )
 
+# repository의 fun import
+from app.repositories.catalog_product_repository import (
+    get_catalog_product_by_external_catalog_id,
+)
+# 네이버 크롤링 서비스 import
+from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
+
+
+
 
 FIXED_SHIP_FROM_ZIPCODE = "31144"
 FIXED_SHIP_FROM_ADDRESS1 = "충청남도 천안시 동남구 대흥로 215 7층"
@@ -72,13 +81,57 @@ class AdminProductService:
         db.add(brand)
         db.flush()
         return brand
+    
+    # 카탈로그 이름 조회
+    @staticmethod
+    def resolve_catalog_name(
+        db: Session,
+        external_catalog_id: str | None,
+    ) -> str | None:
+        if not external_catalog_id:
+            return None
+
+        external_catalog_id = external_catalog_id.strip()
+        if not external_catalog_id:
+            return None
+
+        catalog = get_catalog_product_by_external_catalog_id(
+            db,
+            external_catalog_id,
+        )
+        if catalog:
+            return catalog.catalog_name
+
+        crawl_result = fetch_catalog_info_by_catalog(external_catalog_id)
+        if not crawl_result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="카탈로그가 존재하지 않거나 크롤링에 실패했습니다.",
+            )
+
+        catalog_name = crawl_result.get("catalog_name")
+        lowest_price = crawl_result.get("lowest_price")
+
+        if not catalog_name and lowest_price is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="카탈로그가 존재하지 않거나 크롤링 결과가 올바르지 않습니다.",
+            )
+
+        if not catalog_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="카탈로그 이름을 찾을 수 없습니다.",
+            )
+
+        return catalog_name
+
 
     @staticmethod
     def _get_or_create_catalog_product(
         db: Session,
         external_catalog_id: str | None,
         catalog_name: str | None,
-        category_text: str | None,
     ) -> CatalogProduct | None:
         if not external_catalog_id:
             return None
@@ -87,23 +140,25 @@ class AdminProductService:
         if not external_catalog_id:
             return None
 
-        catalog = (
-            db.query(CatalogProduct)
-            .filter(CatalogProduct.external_catalog_id == external_catalog_id)
-            .first()
+        catalog = get_catalog_product_by_external_catalog_id(
+            db,
+            external_catalog_id,
         )
         if catalog:
             if catalog_name:
                 catalog.catalog_name = catalog_name
-            if category_text:
-                catalog.category_text = category_text
             return catalog
+
+        if not catalog_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="카탈로그 이름이 없어 카탈로그를 생성할 수 없습니다.",
+            )
 
         catalog = CatalogProduct(
             external_catalog_id=external_catalog_id,
-            catalog_name=catalog_name or external_catalog_id,
+            catalog_name=catalog_name,
             source="NAVER",
-            category_text=category_text,
         )
         db.add(catalog)
         db.flush()
@@ -186,7 +241,6 @@ class AdminProductService:
             db=db,
             external_catalog_id=payload.catalog_external_id,
             catalog_name=payload.catalog_name,
-            category_text=category.full_path,
         )
 
         product_code = AdminProductService._generate_product_code(db, category.name)

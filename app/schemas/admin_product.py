@@ -92,3 +92,7 @@ class AdminProductDetailResponse(BaseModel):
 class ProductImageUploadResponse(BaseModel):
     image_url: str
     public_id: str
+
+class CatalogNameResolveResponse(BaseModel):
+    external_catalog_id: str
+    catalog_name: str | None = None
