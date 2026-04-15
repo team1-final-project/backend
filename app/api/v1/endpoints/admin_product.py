@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.security import get_current_active_user
 from app.models.member import Member
 from app.schemas.admin_product import (
+    AdminPriceSearchListResponse,
     AdminProductCreateRequest,
     AdminProductCreateResponse,
     AdminProductDetailResponse,
@@ -50,6 +51,12 @@ def create_admin_product(
 ):
     return AdminProductService.create_product(db, current_user, payload)
 
+@router.get("/price-search/list", response_model=AdminPriceSearchListResponse)
+def read_admin_price_search_list(
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.list_price_search_items(db, current_user)
 
 @router.get("/{product_code}", response_model=AdminProductDetailResponse)
 def read_admin_product_detail(

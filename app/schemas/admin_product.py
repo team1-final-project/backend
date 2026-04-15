@@ -116,3 +116,30 @@ class AdminProductListResponse(BaseModel):
     size: int
     total: int
     total_pages: int
+class AdminPriceSearchItemResponse(BaseModel):
+    id: int
+    product_code: str
+    product_name: str
+    sale_status: ProductSaleStatus
+
+    category_id: int
+    category_path: str | None = None
+    catalog_external_id: str | None = None
+
+    sale_price: int
+    ai_pricing_enabled: bool
+    min_price_limit: int | None = None
+    max_price_limit: int | None = None
+
+    stock_qty: int
+
+    market_lowest_price: int | None = None
+    is_lowest_price: bool | None = None
+    price_gap: int | None = None
+    price_gap_rate: float | None = None
+
+    updated_at: datetime
+
+
+class AdminPriceSearchListResponse(BaseModel):
+    items: list[AdminPriceSearchItemResponse] = Field(default_factory=list)
