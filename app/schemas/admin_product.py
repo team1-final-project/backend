@@ -109,13 +109,20 @@ class AdminProductListItemResponse(BaseModel):
     sale_status: str
     updated_at: datetime
 
+class AdminProductListSummaryResponse(BaseModel):
+    total_count: int
+    sale_count: int
+    sold_out_count: int
+    hidden_count: int
 
 class AdminProductListResponse(BaseModel):
     items: list[AdminProductListItemResponse]
+    summary: AdminProductListSummaryResponse
     page: int
     size: int
     total: int
     total_pages: int
+
 class AdminPriceSearchItemResponse(BaseModel):
     id: int
     product_code: str
@@ -143,3 +150,12 @@ class AdminPriceSearchItemResponse(BaseModel):
 
 class AdminPriceSearchListResponse(BaseModel):
     items: list[AdminPriceSearchItemResponse] = Field(default_factory=list)
+
+class AdminProductVisibilityUpdateRequest(BaseModel):
+    is_visible: bool
+
+class AdminProductVisibilityUpdateResponse(BaseModel):
+    id: int
+    product_code: str
+    is_visible: bool
+    message: str

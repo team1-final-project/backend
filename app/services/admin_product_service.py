@@ -603,20 +603,20 @@ class AdminProductService:
         page = max(page, 1)
         size = max(1, min(size, 100))
 
-        query = (
+        base_query = (
             db.query(Product, Category)
             .join(Category, Category.id == Product.category_id)
             .filter(Product.deleted_at.is_(None))
         )
 
         if category_id is not None:
-            query = query.filter(Product.category_id == category_id)
+            base_query = base_query.filter(Product.category_id == category_id)
 
         if keyword:
             keyword = keyword.strip()
             if keyword:
                 like_keyword = f"%{keyword}%"
-                query = query.filter(
+                base_query = base_query.filter(
                     or_(
                         Product.product_name.ilike(like_keyword),
                         Product.product_code.ilike(like_keyword),
@@ -625,17 +625,36 @@ class AdminProductService:
 
         if start_date is not None:
             start_datetime = datetime.combine(start_date, time.min)
-            query = query.filter(Product.updated_at >= start_datetime)
+            base_query = base_query.filter(Product.updated_at >= start_datetime)
 
         if end_date is not None:
             end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
-            query = query.filter(Product.updated_at < end_datetime)
+            base_query = base_query.filter(Product.updated_at < end_datetime)
 
-        total = query.count()
+        summary_products = [row[0] for row in base_query.all()]
+
+        summary = {
+            "total_count": len(summary_products),
+            "sale_count": sum(
+                1
+                for product in summary_products
+                if product.sale_status and product.sale_status.value == "ON_SALE"
+            ),
+            "sold_out_count": sum(
+                1
+                for product in summary_products
+                if product.sale_status and product.sale_status.value == "SOLD_OUT"
+            ),
+            "hidden_count": sum(
+                1 for product in summary_products if not product.is_visible
+            ),
+        }
+
+        total = summary["total_count"]
         total_pages = ceil(total / size) if total > 0 else 1
 
         rows = (
-            query.order_by(Product.updated_at.desc(), Product.id.desc())
+            base_query.order_by(Product.updated_at.desc(), Product.id.desc())
             .offset((page - 1) * size)
             .limit(size)
             .all()
@@ -660,8 +679,42 @@ class AdminProductService:
 
         return {
             "items": items,
+            "summary": summary,
             "page": page,
             "size": size,
             "total": total,
             "total_pages": total_pages,
+        }
+    
+    @staticmethod
+    def update_product_visibility(
+        db: Session,
+        current_user: Member,
+        product_id: int,
+        is_visible: bool,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        product = (
+            db.query(Product)
+            .filter(Product.id == product_id, Product.deleted_at.is_(None))
+            .first()
+        )
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        product.is_visible = is_visible
+
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+
+        return {
+            "id": product.id,
+            "product_code": product.product_code,
+            "is_visible": product.is_visible,
+            "message": "노출 상태가 변경되었습니다.",
         }

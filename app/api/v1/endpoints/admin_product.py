@@ -15,6 +15,8 @@ from app.schemas.admin_product import (
     ProductImageUploadResponse,
     CatalogNameResolveResponse,
     AdminProductListResponse,
+    AdminProductVisibilityUpdateRequest,
+    AdminProductVisibilityUpdateResponse,
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
@@ -113,3 +115,20 @@ def get_catalog_name(
         "external_catalog_id": external_catalog_id,
         "catalog_name": catalog_name,
     }
+
+@router.patch(
+    "/{product_id}/visibility",
+    response_model=AdminProductVisibilityUpdateResponse,
+)
+def update_admin_product_visibility(
+    product_id: int,
+    payload: AdminProductVisibilityUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.update_product_visibility(
+        db=db,
+        current_user=current_user,
+        product_id=product_id,
+        is_visible=payload.is_visible,
+    )
