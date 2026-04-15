@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile, Query
 from sqlalchemy.orm import Session
+from datetime import date
 
 from app.core.database import get_db
 from app.core.security import get_current_active_user
@@ -11,13 +12,35 @@ from app.schemas.admin_product import (
     AdminProductUpdateRequest,
     AdminProductUpdateResponse,
     ProductImageUploadResponse,
-    CatalogNameResolveResponse
+    CatalogNameResolveResponse,
+    AdminProductListResponse,
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
 
 router = APIRouter(prefix="/admin/products", tags=["admin-products"])
 
+@router.get("", response_model=AdminProductListResponse)
+def get_admin_products(
+    keyword: str | None = Query(default=None),
+    category_id: int | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.get_product_list(
+        db=db,
+        current_user=current_user,
+        keyword=keyword,
+        category_id=category_id,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        size=size,
+    )
 
 @router.post("", response_model=AdminProductCreateResponse, status_code=201)
 def create_admin_product(

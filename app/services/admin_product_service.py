@@ -3,6 +3,9 @@ import string
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from datetime import date, datetime, time, timedelta
+from math import ceil
+from sqlalchemy import or_
 
 from app.core.enums import ImageType, MemberRole
 from app.models.brand import Brand
@@ -491,4 +494,83 @@ class AdminProductService:
             "product_code": product.product_code,
             "product_name": product.product_name,
             "message": "상품이 수정되었습니다.",
+        }
+    
+    @staticmethod
+    def get_product_list(
+        db: Session,
+        current_user: Member,
+        keyword: str | None = None,
+        category_id: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        page: int = 1,
+        size: int = 10,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        page = max(page, 1)
+        size = max(1, min(size, 100))
+
+        query = (
+            db.query(Product, Category)
+            .join(Category, Category.id == Product.category_id)
+            .filter(Product.deleted_at.is_(None))
+        )
+
+        if category_id is not None:
+            query = query.filter(Product.category_id == category_id)
+
+        if keyword:
+            keyword = keyword.strip()
+            if keyword:
+                like_keyword = f"%{keyword}%"
+                query = query.filter(
+                    or_(
+                        Product.product_name.ilike(like_keyword),
+                        Product.product_code.ilike(like_keyword),
+                    )
+                )
+
+        if start_date is not None:
+            start_datetime = datetime.combine(start_date, time.min)
+            query = query.filter(Product.updated_at >= start_datetime)
+
+        if end_date is not None:
+            end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
+            query = query.filter(Product.updated_at < end_datetime)
+
+        total = query.count()
+        total_pages = ceil(total / size) if total > 0 else 1
+
+        rows = (
+            query.order_by(Product.updated_at.desc(), Product.id.desc())
+            .offset((page - 1) * size)
+            .limit(size)
+            .all()
+        )
+
+        items = []
+        for product, category in rows:
+            items.append(
+                {
+                    "id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "category_id": product.category_id,
+                    "category_name": getattr(category, "full_path", None) or category.name,
+                    "sale_price": product.sale_price,
+                    "is_visible": product.is_visible,
+                    "stock_qty": product.stock_qty,
+                    "sale_status": product.sale_status.value if product.sale_status else None,
+                    "updated_at": product.updated_at,
+                }
+            )
+
+        return {
+            "items": items,
+            "page": page,
+            "size": size,
+            "total": total,
+            "total_pages": total_pages,
         }

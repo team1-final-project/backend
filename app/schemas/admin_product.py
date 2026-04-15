@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -96,3 +96,23 @@ class ProductImageUploadResponse(BaseModel):
 class CatalogNameResolveResponse(BaseModel):
     external_catalog_id: str
     catalog_name: str | None = None
+
+class AdminProductListItemResponse(BaseModel):
+    id: int
+    product_code: str
+    product_name: str
+    category_id: int
+    category_name: str
+    sale_price: int
+    is_visible: bool
+    stock_qty: int
+    sale_status: str
+    updated_at: datetime
+
+
+class AdminProductListResponse(BaseModel):
+    items: list[AdminProductListItemResponse]
+    page: int
+    size: int
+    total: int
+    total_pages: int
