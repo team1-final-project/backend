@@ -2,7 +2,8 @@ import random
 import string
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func
+from sqlalchemy.orm import Session, aliased
 
 from app.core.enums import ImageType, MemberRole
 from app.models.brand import Brand
@@ -11,19 +12,16 @@ from app.models.category import Category
 from app.models.member import Member
 from app.models.product import Product
 from app.models.product_image import ProductImage
+from app.models.product_price_history import ProductPriceHistory
 from app.schemas.admin_product import (
     AdminProductCreateRequest,
     AdminProductUpdateRequest,
 )
 
-# repository의 fun import
 from app.repositories.catalog_product_repository import (
     get_catalog_product_by_external_catalog_id,
 )
-# 네이버 크롤링 서비스 import
 from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
-
-
 
 
 FIXED_SHIP_FROM_ZIPCODE = "31144"
@@ -81,8 +79,7 @@ class AdminProductService:
         db.add(brand)
         db.flush()
         return brand
-    
-    # 카탈로그 이름 조회
+
     @staticmethod
     def resolve_catalog_name(
         db: Session,
@@ -126,12 +123,12 @@ class AdminProductService:
 
         return catalog_name
 
-
     @staticmethod
     def _get_or_create_catalog_product(
         db: Session,
         external_catalog_id: str | None,
         catalog_name: str | None,
+        category_text: str | None = None,
     ) -> CatalogProduct | None:
         if not external_catalog_id:
             return None
@@ -147,6 +144,8 @@ class AdminProductService:
         if catalog:
             if catalog_name:
                 catalog.catalog_name = catalog_name
+            if category_text:
+                catalog.category_text = category_text
             return catalog
 
         if not catalog_name:
@@ -159,6 +158,7 @@ class AdminProductService:
             external_catalog_id=external_catalog_id,
             catalog_name=catalog_name,
             source="NAVER",
+            category_text=category_text,
         )
         db.add(catalog)
         db.flush()
@@ -241,6 +241,7 @@ class AdminProductService:
             db=db,
             external_catalog_id=payload.catalog_external_id,
             catalog_name=payload.catalog_name,
+            category_text=category.full_path,
         )
 
         product_code = AdminProductService._generate_product_code(db, category.name)
@@ -257,8 +258,12 @@ class AdminProductService:
             sale_price=payload.sale_price,
             sale_status=payload.sale_status,
             ai_pricing_enabled=payload.ai_pricing_enabled,
-            min_price_limit=payload.min_price_limit if payload.ai_pricing_enabled else None,
-            max_price_limit=payload.max_price_limit if payload.ai_pricing_enabled else None,
+            min_price_limit=(
+                payload.min_price_limit if payload.ai_pricing_enabled else None
+            ),
+            max_price_limit=(
+                payload.max_price_limit if payload.ai_pricing_enabled else None
+            ),
             stock_qty=payload.stock_qty,
             safety_stock_qty=payload.safety_stock_qty,
             expiration_date=payload.expiration_date,
@@ -373,6 +378,93 @@ class AdminProductService:
             "thumbnail_image_url": thumbnail.image_url if thumbnail else None,
             "detail_image_urls": [image.image_url for image in detail_images],
         }
+
+    @staticmethod
+    def list_price_search_items(
+        db: Session,
+        current_user: Member,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        latest_history_subquery = (
+            db.query(
+                ProductPriceHistory.product_id.label("product_id"),
+                func.max(ProductPriceHistory.logged_at).label("latest_logged_at"),
+            )
+            .group_by(ProductPriceHistory.product_id)
+            .subquery()
+        )
+
+        latest_history = aliased(ProductPriceHistory)
+
+        records = (
+            db.query(Product, Category, CatalogProduct, latest_history)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .outerjoin(CatalogProduct, Product.catalog_product_id == CatalogProduct.id)
+            .outerjoin(
+                latest_history_subquery,
+                Product.id == latest_history_subquery.c.product_id,
+            )
+            .outerjoin(
+                latest_history,
+                and_(
+                    latest_history.product_id == latest_history_subquery.c.product_id,
+                    latest_history.logged_at
+                    == latest_history_subquery.c.latest_logged_at,
+                ),
+            )
+            .filter(Product.deleted_at.is_(None))
+            .order_by(Product.updated_at.desc(), Product.id.desc())
+            .all()
+        )
+
+        items = []
+        for product, category, catalog, price_history in records:
+            market_lowest_price = None
+            if price_history and price_history.market_lowest_price is not None:
+                market_lowest_price = int(price_history.market_lowest_price)
+            elif catalog and catalog.current_lowest_price is not None:
+                market_lowest_price = int(catalog.current_lowest_price)
+
+            is_lowest_price = None
+            price_gap = None
+            price_gap_rate = None
+
+            if market_lowest_price is not None:
+                price_gap = int(product.sale_price) - int(market_lowest_price)
+                is_lowest_price = int(product.sale_price) <= int(market_lowest_price)
+
+                if int(market_lowest_price) > 0:
+                    price_gap_rate = round(
+                        (price_gap / int(market_lowest_price)) * 100,
+                        1,
+                    )
+
+            items.append(
+                {
+                    "id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "sale_status": product.sale_status,
+                    "category_id": product.category_id,
+                    "category_path": category.full_path if category else None,
+                    "catalog_external_id": (
+                        catalog.external_catalog_id if catalog else None
+                    ),
+                    "sale_price": int(product.sale_price),
+                    "ai_pricing_enabled": bool(product.ai_pricing_enabled),
+                    "min_price_limit": product.min_price_limit,
+                    "max_price_limit": product.max_price_limit,
+                    "stock_qty": int(product.stock_qty),
+                    "market_lowest_price": market_lowest_price,
+                    "is_lowest_price": is_lowest_price,
+                    "price_gap": price_gap,
+                    "price_gap_rate": price_gap_rate,
+                    "updated_at": product.updated_at,
+                }
+            )
+
+        return {"items": items}
 
     @staticmethod
     def update_product(
