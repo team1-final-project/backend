@@ -17,11 +17,15 @@ from app.schemas.admin_product import (
     AdminProductListResponse,
     AdminProductVisibilityUpdateRequest,
     AdminProductVisibilityUpdateResponse,
+    AdminLiveInventoryListResponse,
+    AdminLiveInventoryUpdateRequest,
+    AdminLiveInventoryUpdateResponse,
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
 
 router = APIRouter(prefix="/admin/products", tags=["admin-products"])
+
 
 @router.get("", response_model=AdminProductListResponse)
 def get_admin_products(
@@ -45,6 +49,7 @@ def get_admin_products(
         size=size,
     )
 
+
 @router.post("", response_model=AdminProductCreateResponse, status_code=201)
 def create_admin_product(
     payload: AdminProductCreateRequest,
@@ -53,12 +58,22 @@ def create_admin_product(
 ):
     return AdminProductService.create_product(db, current_user, payload)
 
+
 @router.get("/price-search/list", response_model=AdminPriceSearchListResponse)
 def read_admin_price_search_list(
     db: Session = Depends(get_db),
     current_user: Member = Depends(get_current_active_user),
 ):
     return AdminProductService.list_price_search_items(db, current_user)
+
+
+@router.get("/live-inventory/list", response_model=AdminLiveInventoryListResponse)
+def read_admin_live_inventory_list(
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.list_live_inventory_items(db, current_user)
+
 
 @router.get("/{product_code}", response_model=AdminProductDetailResponse)
 def read_admin_product_detail(
@@ -79,6 +94,24 @@ def update_admin_product(
     return AdminProductService.update_product(db, current_user, product_code, payload)
 
 
+@router.patch(
+    "/live-inventory/{product_code}",
+    response_model=AdminLiveInventoryUpdateResponse,
+)
+def patch_admin_live_inventory_row(
+    product_code: str,
+    payload: AdminLiveInventoryUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.update_live_inventory_row(
+        db=db,
+        current_user=current_user,
+        product_code=product_code,
+        payload=payload,
+    )
+
+
 @router.post("/images/thumbnail", response_model=ProductImageUploadResponse)
 async def upload_product_thumbnail(
     file: UploadFile = File(...),
@@ -93,7 +126,11 @@ async def upload_product_thumbnail(
 async def upload_product_detail(
     file: UploadFile = File(...),
 ):
-    return CloudinaryService.upload_product_detail_image(file.file, file.filename or "detail")
+    return CloudinaryService.upload_product_detail_image(
+        file.file,
+        file.filename or "detail",
+    )
+
 
 @router.get(
     "/catalogs/{external_catalog_id}/name",
@@ -115,6 +152,7 @@ def get_catalog_name(
         "external_catalog_id": external_catalog_id,
         "catalog_name": catalog_name,
     }
+
 
 @router.patch(
     "/{product_id}/visibility",

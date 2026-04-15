@@ -93,9 +93,11 @@ class ProductImageUploadResponse(BaseModel):
     image_url: str
     public_id: str
 
+
 class CatalogNameResolveResponse(BaseModel):
     external_catalog_id: str
     catalog_name: str | None = None
+
 
 class AdminProductListItemResponse(BaseModel):
     id: int
@@ -109,11 +111,13 @@ class AdminProductListItemResponse(BaseModel):
     sale_status: str
     updated_at: datetime
 
+
 class AdminProductListSummaryResponse(BaseModel):
     total_count: int
     sale_count: int
     sold_out_count: int
     hidden_count: int
+
 
 class AdminProductListResponse(BaseModel):
     items: list[AdminProductListItemResponse]
@@ -122,6 +126,7 @@ class AdminProductListResponse(BaseModel):
     size: int
     total: int
     total_pages: int
+
 
 class AdminPriceSearchItemResponse(BaseModel):
     id: int
@@ -151,8 +156,39 @@ class AdminPriceSearchItemResponse(BaseModel):
 class AdminPriceSearchListResponse(BaseModel):
     items: list[AdminPriceSearchItemResponse] = Field(default_factory=list)
 
+
+class AdminLiveInventoryItemResponse(BaseModel):
+    id: int
+    product_code: str
+    product_name: str
+    total_stock: int
+    available_stock: int
+    safety_stock_qty: int
+    inventory_status: str
+    purchase_price: int
+    asset_amount: int
+    sale_status: ProductSaleStatus
+    category: str | None = None
+
+
+class AdminLiveInventoryListResponse(BaseModel):
+    items: list[AdminLiveInventoryItemResponse] = Field(default_factory=list)
+
+
+class AdminLiveInventoryUpdateRequest(BaseModel):
+    sale_status: ProductSaleStatus
+
+
+class AdminLiveInventoryUpdateResponse(BaseModel):
+    id: int
+    product_code: str
+    sale_status: ProductSaleStatus
+    message: str
+
+
 class AdminProductVisibilityUpdateRequest(BaseModel):
     is_visible: bool
+
 
 class AdminProductVisibilityUpdateResponse(BaseModel):
     id: int

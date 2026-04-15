@@ -18,6 +18,7 @@ from app.models.product_price_history import ProductPriceHistory
 from app.schemas.admin_product import (
     AdminProductCreateRequest,
     AdminProductUpdateRequest,
+    AdminLiveInventoryUpdateRequest,
 )
 
 from app.repositories.catalog_product_repository import (
@@ -586,7 +587,7 @@ class AdminProductService:
             "product_name": product.product_name,
             "message": "상품이 수정되었습니다.",
         }
-    
+
     @staticmethod
     def get_product_list(
         db: Session,
@@ -685,7 +686,92 @@ class AdminProductService:
             "total": total,
             "total_pages": total_pages,
         }
-    
+
+    @staticmethod
+    def list_live_inventory_items(
+        db: Session,
+        current_user: Member,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        records = (
+            db.query(Product, Category)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .filter(Product.deleted_at.is_(None))
+            .order_by(Product.updated_at.desc(), Product.id.desc())
+            .all()
+        )
+
+        items = []
+        for product, category in records:
+            total_stock = int(product.stock_qty or 0)
+            available_stock = int(product.stock_qty or 0)
+            safety_stock_qty = int(product.safety_stock_qty or 0)
+            purchase_price = int(product.cost_price or 0)
+            asset_amount = available_stock * purchase_price
+
+            if available_stock <= 0:
+                inventory_status = "일시품절"
+            elif available_stock <= safety_stock_qty:
+                inventory_status = "발주권고"
+            else:
+                inventory_status = "안전재고"
+
+            items.append(
+                {
+                    "id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "total_stock": total_stock,
+                    "available_stock": available_stock,
+                    "safety_stock_qty": safety_stock_qty,
+                    "inventory_status": inventory_status,
+                    "purchase_price": purchase_price,
+                    "asset_amount": asset_amount,
+                    "sale_status": product.sale_status,
+                    "category": category.full_path if category else None,
+                }
+            )
+
+        return {"items": items}
+
+    @staticmethod
+    def update_live_inventory_row(
+        db: Session,
+        current_user: Member,
+        product_code: str,
+        payload: AdminLiveInventoryUpdateRequest,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        product = (
+            db.query(Product)
+            .filter(
+                Product.product_code == product_code,
+                Product.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        product.sale_status = payload.sale_status
+
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+
+        return {
+            "id": product.id,
+            "product_code": product.product_code,
+            "sale_status": product.sale_status,
+            "message": "실시간 재고 항목이 수정되었습니다.",
+        }
+
     @staticmethod
     def update_product_visibility(
         db: Session,
