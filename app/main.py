@@ -17,31 +17,47 @@ from app.services.ai_pricing_scheduler import (
 
 load_dotenv()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
 
-    ai_task = None
+# 자동 프라이싱
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     Base.metadata.create_all(bind=engine)
 
-    if settings.AI_PRICING_SCHEDULER_ENABLED:
-        ai_task = asyncio.create_task(run_ai_pricing_scheduler_forever())
-        app.state.ai_pricing_task = ai_task
-        print(
-            f"[AI SCHEDULER] started "
-            f"(interval={settings.AI_PRICING_INTERVAL_MINUTES} minutes)"
-        )
+#     ai_task = None
 
-    try:
-        yield
-    finally:
-        await stop_task_safely(ai_task)
-        print("[AI SCHEDULER] stopped")
+#     if settings.AI_PRICING_SCHEDULER_ENABLED:
+#         ai_task = asyncio.create_task(run_ai_pricing_scheduler_forever())
+#         app.state.ai_pricing_task = ai_task
+#         print(
+#             f"[AI SCHEDULER] started "
+#             f"(interval={settings.AI_PRICING_INTERVAL_MINUTES} minutes)"
+#         )
+
+#     try:
+#         yield
+#     finally:
+#         await stop_task_safely(ai_task)
+#         print("[AI SCHEDULER] stopped")
 
 
-app = FastAPI(
-    title=settings.app_name,
-    lifespan=lifespan,
-)
+# app = FastAPI(
+#     title=settings.app_name,
+#     lifespan=lifespan,
+# )
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         "http://localhost:3000",
+#         "http://127.0.0.1:3000",
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# 자동 프라이싱 없음
+app = FastAPI(title=settings.app_name)
 
 app.add_middleware(
     CORSMiddleware,
