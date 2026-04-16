@@ -15,7 +15,9 @@ from app.core.database import SessionLocal
 from app.core.enums import PriceChangeSource
 from app.core.timezone import now_kst
 from app.models.product import Product
+from app.models.catalog_product import CatalogProduct
 from app.models.product_price_history import ProductPriceHistory
+from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
 
 logger = logging.getLogger(__name__)
 _scheduler_lock = asyncio.Lock()
@@ -32,31 +34,44 @@ def _get_price_change_limit(product: Product) -> float:
     return float(value)
 
 
-def _get_market_info(product: Product) -> tuple[Optional[float], Optional[str]]:
+def _get_market_info(db: Session, product: Product) -> tuple[float, str | None, str]:
     """
-    외부 최저가 / 카탈로그명 조회.
-    네 기존 크롤링 서비스에 맞춰 여기만 연결하면 됨.
-
-    지금은 안전하게 fallback(None, None) 처리.
-    필요하면 아래 TODO 부분만 네 crawler 함수명에 맞게 바꿔.
+    외부 최저가 조회에 실패하면 예외를 발생시켜
+    해당 상품은 저장되지 않도록 한다.
     """
-    catalog_code = getattr(product, "catalog_id", None) or getattr(product, "catalog_code", None)
-    if not catalog_code:
-        return None, None
+    catalog_product_id = getattr(product, "catalog_product_id", None)
+    if not catalog_product_id:
+        raise ValueError(f"product_id={product.id}: catalog_product_id가 없습니다.")
 
-    try:
-        # TODO:
-        # 네 프로젝트의 실제 함수명에 맞춰 수정
-        # 예:
-        # from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
-        # info = fetch_catalog_info_by_catalog(str(catalog_code))
-        # return info.get("lowest_price"), info.get("catalog_name")
+    catalog = (
+        db.query(CatalogProduct)
+        .filter(CatalogProduct.id == catalog_product_id)
+        .first()
+    )
+    if catalog is None:
+        raise ValueError(f"product_id={product.id}: catalog_product를 찾을 수 없습니다.")
 
-        return None, None
-    except Exception:
-        logger.exception("외부 최저가 조회 실패. product_id=%s", product.id)
-        return None, None
+    external_catalog_id = getattr(catalog, "external_catalog_id", None)
+    if not external_catalog_id:
+        raise ValueError(f"product_id={product.id}: external_catalog_id가 없습니다.")
 
+    logger.info(
+        "외부 최저가 크롤링 시작. product_id=%s, external_catalog_id=%s",
+        product.id,
+        external_catalog_id,
+    )
+
+    info = fetch_catalog_info_by_catalog(str(external_catalog_id))
+    if not info:
+        raise ValueError(f"product_id={product.id}: 외부 최저가 조회 결과가 없습니다.")
+
+    market_lowest_price = info.get("lowest_price")
+    catalog_name = info.get("catalog_name")
+
+    if market_lowest_price is None:
+        raise ValueError(f"product_id={product.id}: 외부 최저가가 없습니다.")
+
+    return float(market_lowest_price), catalog_name, str(external_catalog_id)
 
 def _build_history_row(
     product: Product,
@@ -97,7 +112,7 @@ def _build_history_row(
         min_price_limit=getattr(product, "min_price_limit", None),
         max_price_limit=getattr(product, "max_price_limit", None),
 
-        remaining_stock=int(product.stock_qty or 0),
+        remaining_stock=product.stock_qty,
 
         change_source=PriceChangeSource.AI,
         changed_by=None,
@@ -108,12 +123,8 @@ def _build_history_row(
     )
 
 def _process_one_product(db: Session, product: Product) -> None:
-    """
-    상품 1건 처리
-    """
     old_price = float(product.sale_price)
 
-    # ===== 필수 매핑 =====
     keyword = getattr(product, "product_name", None)
     current_price = float(product.sale_price)
     min_price_limit = float(getattr(product, "min_price_limit"))
@@ -125,8 +136,7 @@ def _process_one_product(db: Session, product: Product) -> None:
     if not product_code:
         raise ValueError(f"product_id={product.id}: product_code가 없습니다.")
 
-    catalog_code = getattr(product, "catalog_id", None) or getattr(product, "catalog_code", None)
-    market_lowest_price, catalog_name = _get_market_info(product)
+    market_lowest_price, catalog_name, external_catalog_id = _get_market_info(db, product)
 
     result = predict_optimal_price(
         keyword=keyword,
@@ -138,21 +148,16 @@ def _process_one_product(db: Session, product: Product) -> None:
         safety_stock=safety_stock,
         good_id=str(product_code),
         market_lowest_price=market_lowest_price,
-        catalog_code=str(catalog_code) if catalog_code is not None else None,
+        catalog_code=external_catalog_id,
         catalog_name=catalog_name,
     )
 
     new_price = float(result["change_price"])
-
-    # 3-1) product.sale_price 반영
     product.sale_price = new_price
 
-    # 필요하면 수정일 직접 갱신
     if hasattr(product, "u_date"):
-        from app.core.timezone import now_kst
         product.u_date = now_kst()
 
-    # 3-2) price history 로그 삽입
     history = _build_history_row(
         product=product,
         old_price=old_price,
@@ -160,8 +165,7 @@ def _process_one_product(db: Session, product: Product) -> None:
         market_lowest_price=market_lowest_price,
     )
     db.add(history)
-
-
+    
 def _run_ai_pricing_once_sync() -> None:
     """
     동기 DB 작업 본체
