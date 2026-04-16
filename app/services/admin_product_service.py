@@ -647,8 +647,8 @@ class AdminProductService:
                 for product in summary_products
                 if product.sale_status and product.sale_status.value == "SOLD_OUT"
             ),
-            "hidden_count": sum(
-                1 for product in summary_products if not product.is_visible
+            "ai_enabled_count": sum(
+                1 for product in summary_products if bool(product.ai_pricing_enabled)
             ),
         }
 
@@ -672,7 +672,7 @@ class AdminProductService:
                     "category_id": product.category_id,
                     "category_name": getattr(category, "full_path", None) or category.name,
                     "sale_price": product.sale_price,
-                    "is_visible": product.is_visible,
+                    "ai_pricing_enabled": bool(product.ai_pricing_enabled),
                     "stock_qty": product.stock_qty,
                     "sale_status": product.sale_status.value if product.sale_status else None,
                     "updated_at": product.updated_at,
@@ -853,27 +853,36 @@ class AdminProductService:
             "message": "실시간 재고 항목이 수정되었습니다.",
         }
 
+    
     @staticmethod
-    def update_product_visibility(
+    def update_ai_pricing_enabled(
         db: Session,
         current_user: Member,
         product_id: int,
-        is_visible: bool,
+        ai_pricing_enabled: bool,
     ) -> dict:
         AdminProductService._ensure_admin(current_user)
 
         product = (
             db.query(Product)
-            .filter(Product.id == product_id, Product.deleted_at.is_(None))
+            .filter(
+                Product.id == product_id,
+                Product.deleted_at.is_(None),
+            )
             .first()
         )
+
         if product is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="상품을 찾을 수 없습니다.",
             )
 
-        product.is_visible = is_visible
+        product.ai_pricing_enabled = ai_pricing_enabled
+
+        if not ai_pricing_enabled:
+            product.min_price_limit = None
+            product.max_price_limit = None
 
         db.add(product)
         db.commit()
@@ -882,6 +891,6 @@ class AdminProductService:
         return {
             "id": product.id,
             "product_code": product.product_code,
-            "is_visible": product.is_visible,
-            "message": "노출 상태가 변경되었습니다.",
+            "ai_pricing_enabled": product.ai_pricing_enabled,
+            "message": "AI 가격변경 사용 여부가 변경되었습니다.",
         }
