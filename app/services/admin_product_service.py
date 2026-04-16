@@ -55,20 +55,6 @@ class AdminProductService:
             )
 
     @staticmethod
-    def _generate_product_code(db: Session, sub_category_name: str) -> str:
-        prefix = CATEGORY_CODE_PREFIX.get(sub_category_name, "PD")
-
-        while True:
-            suffix = "".join(
-                random.choices(string.ascii_uppercase + string.digits, k=4)
-            )
-            code = f"{prefix}-{suffix}"
-
-            exists = db.query(Product).filter(Product.product_code == code).first()
-            if not exists:
-                return code
-
-    @staticmethod
     def _get_or_create_brand(db: Session, brand_name: str | None) -> Brand | None:
         if not brand_name:
             return None
@@ -207,6 +193,37 @@ class AdminProductService:
             )
 
         return category
+    
+    @staticmethod
+    def _normalize_product_code(product_code: str) -> str:
+        code = product_code.strip()
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="상품코드는 비어 있을 수 없습니다.",
+            )
+        return code
+
+    @staticmethod
+    def _ensure_product_code_unique(
+        db: Session,
+        product_code: str,
+        exclude_product_id: int | None = None,
+    ) -> None:
+        query = db.query(Product).filter(
+            Product.product_code == product_code,
+            Product.deleted_at.is_(None),
+        )
+
+        if exclude_product_id is not None:
+            query = query.filter(Product.id != exclude_product_id)
+
+        exists = query.first()
+        if exists:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="이미 사용 중인 상품코드입니다.",
+            )
 
     @staticmethod
     def _get_product_by_code(db: Session, product_code: str) -> Product:
@@ -250,7 +267,8 @@ class AdminProductService:
             category_text=category.full_path,
         )
 
-        product_code = AdminProductService._generate_product_code(db, category.name)
+        product_code = AdminProductService._normalize_product_code(payload.product_code)
+        AdminProductService._ensure_product_code_unique(db, product_code)
 
         product = Product(
             product_code=product_code,

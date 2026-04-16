@@ -37,7 +37,7 @@ class AdminProductBaseRequest(BaseModel):
 
 
 class AdminProductCreateRequest(AdminProductBaseRequest):
-    pass
+    product_code: str = Field(min_length=1, max_length=50)
 
 
 class AdminProductUpdateRequest(AdminProductBaseRequest):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import math
 from typing import Dict, List, Optional
+import re
 
 import pandas as pd
 from fastapi import HTTPException
@@ -23,12 +24,54 @@ HIGH_STOCK_MULTIPLIER = 2.0
 LOW_STOCK_MULTIPLIER = 1.2
 DEFAULT_CATEGORY_CODE = "50000006"
 
+BRAND_PREFIXES = [
+    "CJ", "CJ제일제당", "오뚜기", "농심", "삼양", "팔도", "롯데", "코카콜라"
+]
+
+PACK_PATTERNS = [
+    r"\b\d+\s*개\b",
+    r"\b\d+\s*입\b",
+    r"\b\d+\s*박스\b",
+    r"\b\d+\s*팩\b",
+    r"\b\d+\s*묶음\b",
+]
+
+def normalize_search_keyword(product_name: str) -> str:
+    if not product_name:
+        return ""
+
+    text = product_name.strip()
+
+    # 괄호 제거
+    text = re.sub(r"\([^)]*\)", " ", text)
+
+    # 맨 앞 브랜드 제거
+    for brand in BRAND_PREFIXES:
+        pattern = rf"^\s*{re.escape(brand)}\s+"
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+
+    # 포장/수량 표현 제거
+    for pattern in PACK_PATTERNS:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+
+    # 특수문자 정리
+    text = re.sub(r"[^0-9a-zA-Z가-힣\s]", " ", text)
+
+    # 공백 정리
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # 단위 제거
+    text = re.sub(r"\b\d+(?:\.\d+)?\s*(g|kg|ml|l)\b", " ", text, flags=re.IGNORECASE)
+
+    return text
+
 
 def get_recent_ratio(keyword: str, category_code: str = DEFAULT_CATEGORY_CODE) -> float:
     """
     최근 4주 클릭수 비율 계산
     """
-    rel_data = fetch_relkwdstat([keyword])
+    search_keyword = normalize_search_keyword(keyword)
+    rel_data = fetch_relkwdstat([search_keyword])
     recent_avg = rel_data[0].get("최근4주클릭수평균", 0) if rel_data else 0
 
     today = pd.Timestamp.today()
@@ -40,7 +83,7 @@ def get_recent_ratio(keyword: str, category_code: str = DEFAULT_CATEGORY_CODE) -
             start_date=start_date.strftime("%Y-%m-%d"),
             end_date=end_date.strftime("%Y-%m-%d"),
             category=category_code,
-            keyword=keyword,
+            keyword=search_keyword,
         )
     except Exception as e:
         print(f"⚠️ 검색지표 API 호출 실패: {e}")

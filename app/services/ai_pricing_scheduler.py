@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.ai.inference import predict_optimal_price
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.enums import PriceChangeSource
+from app.core.timezone import now_kst
 from app.models.product import Product
 from app.models.product_price_history import ProductPriceHistory
 
@@ -62,29 +64,48 @@ def _build_history_row(
     result: dict,
     market_lowest_price: Optional[float],
 ) -> ProductPriceHistory:
-    """
-    product_price_history 컬럼명은 네 실제 모델에 맞게 조정 필요.
-    아래는 가장 흔한 형태 기준 예시.
-    """
-    new_price = float(result["change_price"])
+    previous_price = int(round(old_price))
+    applied_price = int(round(float(result["change_price"])))
 
-    history = ProductPriceHistory(
+    price_gap = applied_price - previous_price
+    price_gap_rate = round((price_gap / previous_price) * 100, 2) if previous_price > 0 else 0.0
+
+    is_lowest_price = False
+    if market_lowest_price is not None:
+        market_lowest_price = int(market_lowest_price)
+        is_lowest_price = applied_price <= market_lowest_price
+
+    now = now_kst()
+
+    return ProductPriceHistory(
         product_id=product.id,
+        catalog_product_id=getattr(product, "catalog_product_id", None),
+        logged_at=now,
 
-        # ===== 아래 컬럼명은 네 모델에 맞게 수정 =====
-        sale_price=new_price,
-        predicted_sales=result.get("expect_sale_amount"),
+        previous_sale_price=previous_price,
+        applied_sale_price=applied_price,
+
+        sales_qty=0,
+        sales_per_hour=0,
+
+        is_lowest_price=is_lowest_price,
         market_lowest_price=market_lowest_price,
-        change_rate=result.get("change_rate"),
-        remaining_stock=result.get("remaining_stock"),
-        expected_revenue=result.get("expected_revenue"),
+
+        price_gap=price_gap,
+        price_gap_rate=price_gap_rate,
+
         min_price_limit=getattr(product, "min_price_limit", None),
         max_price_limit=getattr(product, "max_price_limit", None),
-        previous_price=old_price,
-        # created_at / updated_at 자동이면 안 넣어도 됨
-    )
-    return history
 
+        remaining_stock=int(product.stock_qty or 0),
+
+        change_source=PriceChangeSource.AI,
+        changed_by=None,
+        note="AI 자동 가격 조정",
+
+        created_at=now,
+        updated_at=now,
+    )
 
 def _process_one_product(db: Session, product: Product) -> None:
     """
@@ -100,11 +121,9 @@ def _process_one_product(db: Session, product: Product) -> None:
     current_stock = float(getattr(product, "stock_qty"))
     safety_stock = float(getattr(product, "safety_stock_qty"))
 
-    # good_id는 반드시 실제 데이터 원천에 맞춰 연결해야 함
-    # 예: product.good_id / product.product_code / catalog_product.good_id
-    good_id = getattr(product, "good_id", None)
-    if not good_id:
-        raise ValueError(f"product_id={product.id}: good_id 매핑이 필요합니다.")
+    product_code = getattr(product, "product_code", None)
+    if not product_code:
+        raise ValueError(f"product_id={product.id}: product_code가 없습니다.")
 
     catalog_code = getattr(product, "catalog_id", None) or getattr(product, "catalog_code", None)
     market_lowest_price, catalog_name = _get_market_info(product)
@@ -117,7 +136,7 @@ def _process_one_product(db: Session, product: Product) -> None:
         max_price_limit=max_price_limit,
         current_stock=current_stock,
         safety_stock=safety_stock,
-        good_id=str(good_id),
+        good_id=str(product_code),
         market_lowest_price=market_lowest_price,
         catalog_code=str(catalog_code) if catalog_code is not None else None,
         catalog_name=catalog_name,
