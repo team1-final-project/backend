@@ -106,17 +106,17 @@ class AdminProductListItemResponse(BaseModel):
     category_id: int
     category_name: str
     sale_price: int
-    is_visible: bool
     stock_qty: int
     sale_status: str
     updated_at: datetime
+    ai_pricing_enabled: bool
 
 
 class AdminProductListSummaryResponse(BaseModel):
     total_count: int
     sale_count: int
     sold_out_count: int
-    hidden_count: int
+    ai_enabled_count: int
 
 
 class AdminProductListResponse(BaseModel):
@@ -202,12 +202,13 @@ class AdminInventoryHistoryItemResponse(BaseModel):
 class AdminInventoryHistoryListResponse(BaseModel):
     items: list[AdminInventoryHistoryItemResponse] = Field(default_factory=list)
 
-class AdminProductVisibilityUpdateRequest(BaseModel):
-    is_visible: bool
+
+class AdminProductAiPricingUpdateRequest(BaseModel):
+    ai_pricing_enabled: bool
 
 
-class AdminProductVisibilityUpdateResponse(BaseModel):
+class AdminProductAiPricingUpdateResponse(BaseModel):
     id: int
     product_code: str
-    is_visible: bool
+    ai_pricing_enabled: bool
     message: str

@@ -26,7 +26,6 @@ class Product(BaseModel):
         default=ProductSaleStatus.READY,
     )
     
-    is_visible = Column(Boolean, nullable=False, default=True)
 
     ai_pricing_enabled = Column(Boolean, nullable=False, default=False)
     min_price_limit = Column(Integer, nullable=True)
