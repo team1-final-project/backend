@@ -20,3 +20,7 @@ dependencies:
       - requests
       - cloudinary
       - selenium
+      - pandas
+      - joblib
+      - pygam
+      - scikit-learn

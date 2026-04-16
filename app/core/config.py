@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     cloudinary_product_folder: str = "stocker/products"
     cloudinary_detail_folder: str = "stocker/product-details"
 
+    AI_PRICING_SCHEDULER_ENABLED: bool = True
+    AI_PRICING_INTERVAL_MINUTES: int = 10
+    AI_PRICING_RUN_ON_STARTUP: bool = False
+    AI_PRICE_CHANGE_LIMIT_DEFAULT: int = 1000
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False,
