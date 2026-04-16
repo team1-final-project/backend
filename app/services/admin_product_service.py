@@ -16,10 +16,12 @@ from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.product_price_history import ProductPriceHistory
 from app.models.inventory_log import InventoryLog
+from app.core.timezone import now_kst
 from app.schemas.admin_product import (
     AdminProductCreateRequest,
     AdminProductUpdateRequest,
     AdminLiveInventoryUpdateRequest,
+    AdminInboundCreateRequest,
 )
 
 from app.repositories.catalog_product_repository import (
@@ -514,7 +516,6 @@ class AdminProductService:
         product.max_price_limit = (
             payload.max_price_limit if payload.ai_pricing_enabled else None
         )
-        product.stock_qty = payload.stock_qty
         product.safety_stock_qty = payload.safety_stock_qty
         product.expiration_date = payload.expiration_date
         product.shipping_fee = payload.shipping_fee
@@ -854,6 +855,72 @@ class AdminProductService:
         }
 
     
+    @staticmethod
+    def create_inbound(
+        db: Session,
+        current_user: Member,
+        payload: AdminInboundCreateRequest,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        product_code = payload.product_code.strip()
+
+        product = (
+            db.query(Product)
+            .filter(
+                Product.product_code == product_code,
+                Product.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        qty_before = int(product.stock_qty or 0)
+        inbound_qty = int(payload.inbound_qty or 0)
+        qty_after = qty_before + inbound_qty
+
+        product.stock_qty = qty_after
+
+        if payload.expiration_date is not None:
+            product.expiration_date = payload.expiration_date
+
+        inventory_log = InventoryLog(
+            product_id=product.id,
+            change_type=InventoryChangeType.INBOUND,
+            qty_before=qty_before,
+            change_qty=inbound_qty,
+            qty_after=qty_after,
+            related_order_item_id=None,
+            note=payload.note or "관리자 입고 등록",
+            created_by=current_user.id,
+            occurred_at=now_kst(),
+        )
+
+        try:
+            db.add(product)
+            db.add(inventory_log)
+            db.commit()
+            db.refresh(product)
+        except Exception:
+            db.rollback()
+            raise
+
+        return {
+            "id": product.id,
+            "product_code": product.product_code,
+            "product_name": product.product_name,
+            "qty_before": qty_before,
+            "inbound_qty": inbound_qty,
+            "qty_after": qty_after,
+            "expiration_date": product.expiration_date,
+            "message": "입고 등록이 완료되었습니다.",
+        }
+
     @staticmethod
     def update_ai_pricing_enabled(
         db: Session,

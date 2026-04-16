@@ -185,6 +185,25 @@ class AdminLiveInventoryUpdateResponse(BaseModel):
     sale_status: ProductSaleStatus
     message: str
 
+
+class AdminInboundCreateRequest(BaseModel):
+    product_code: str = Field(min_length=1, max_length=50)
+    inbound_qty: int = Field(ge=1)
+    expiration_date: date | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+class AdminInboundCreateResponse(BaseModel):
+    id: int
+    product_code: str
+    product_name: str
+    qty_before: int
+    inbound_qty: int
+    qty_after: int
+    expiration_date: date | None = None
+    message: str
+
+
 class AdminInventoryHistoryItemResponse(BaseModel):
     id: int
     product_id: int

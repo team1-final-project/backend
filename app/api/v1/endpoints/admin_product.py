@@ -20,6 +20,9 @@ from app.schemas.admin_product import (
     AdminLiveInventoryListResponse,
     AdminLiveInventoryUpdateRequest,
     AdminLiveInventoryUpdateResponse,
+    AdminInboundCreateRequest,
+    AdminInboundCreateResponse,
+    AdminInventoryHistoryListResponse,
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
@@ -73,6 +76,39 @@ def read_admin_live_inventory_list(
     current_user: Member = Depends(get_current_active_user),
 ):
     return AdminProductService.list_live_inventory_items(db, current_user)
+
+@router.post("/inbound", response_model=AdminInboundCreateResponse, status_code=201)
+def create_admin_inbound(
+    payload: AdminInboundCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.create_inbound(
+        db=db,
+        current_user=current_user,
+        payload=payload,
+    )
+
+@router.get(
+    "/inventory-history/list",
+    response_model=AdminInventoryHistoryListResponse,
+)
+def read_admin_inventory_history_list(
+    keyword: str | None = Query(default=None),
+    change_type: str | None = Query(default=None),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.list_inventory_history_items(
+        db=db,
+        current_user=current_user,
+        keyword=keyword,
+        change_type=change_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.get("/{product_code}", response_model=AdminProductDetailResponse)
