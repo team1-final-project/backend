@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.core.enums import ProductSaleStatus
+from app.core.enums import InventoryChangeType, ProductSaleStatus
 
 
 class AdminProductBaseRequest(BaseModel):
@@ -185,6 +185,22 @@ class AdminLiveInventoryUpdateResponse(BaseModel):
     sale_status: ProductSaleStatus
     message: str
 
+class AdminInventoryHistoryItemResponse(BaseModel):
+    id: int
+    product_id: int
+    product_code: str
+    product_name: str
+    change_type: InventoryChangeType
+    change_type_label: str
+    qty_before: int
+    change_qty: int
+    qty_after: int
+    note: str | None = None
+    occurred_at: datetime
+
+
+class AdminInventoryHistoryListResponse(BaseModel):
+    items: list[AdminInventoryHistoryItemResponse] = Field(default_factory=list)
 
 class AdminProductVisibilityUpdateRequest(BaseModel):
     is_visible: bool

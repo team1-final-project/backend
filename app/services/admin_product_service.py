@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta
 from math import ceil
 from sqlalchemy import or_, and_, func
 
-from app.core.enums import ImageType, MemberRole
+from app.core.enums import ImageType, InventoryChangeType, MemberRole
 from app.models.brand import Brand
 from app.models.catalog_product import CatalogProduct
 from app.models.category import Category
@@ -15,6 +15,7 @@ from app.models.member import Member
 from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.product_price_history import ProductPriceHistory
+from app.models.inventory_log import InventoryLog
 from app.schemas.admin_product import (
     AdminProductCreateRequest,
     AdminProductUpdateRequest,
@@ -734,6 +735,86 @@ class AdminProductService:
             )
 
         return {"items": items}
+
+    @staticmethod
+    def list_inventory_history_items(
+        db: Session,
+        current_user: Member,
+        keyword: str | None = None,
+        change_type: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        change_type_label_map = {
+            InventoryChangeType.INBOUND: "입고",
+            InventoryChangeType.ORDER_OUT: "출고",
+        }
+
+        query = (
+            db.query(InventoryLog, Product)
+            .join(Product, Product.id == InventoryLog.product_id)
+            .filter(Product.deleted_at.is_(None))
+        )
+
+        if keyword:
+            keyword = keyword.strip()
+            if keyword:
+                like_keyword = f"%{keyword}%"
+                query = query.filter(
+                    or_(
+                        Product.product_name.ilike(like_keyword),
+                        Product.product_code.ilike(like_keyword),
+                        InventoryLog.note.ilike(like_keyword),
+                    )
+                )
+
+        if change_type:
+            normalized_type = change_type.strip().upper()
+            try:
+                query = query.filter(
+                    InventoryLog.change_type == InventoryChangeType(normalized_type)
+                )
+            except ValueError:
+                pass
+
+        if start_date is not None:
+            start_datetime = datetime.combine(start_date, time.min)
+            query = query.filter(InventoryLog.occurred_at >= start_datetime)
+
+        if end_date is not None:
+            end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
+            query = query.filter(InventoryLog.occurred_at < end_datetime)
+
+        records = (
+            query.order_by(InventoryLog.occurred_at.desc(), InventoryLog.id.desc())
+            .all()
+        )
+
+        items = []
+        for inventory_log, product in records:
+            items.append(
+                {
+                    "id": inventory_log.id,
+                    "product_id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "change_type": inventory_log.change_type,
+                    "change_type_label": change_type_label_map.get(
+                        inventory_log.change_type,
+                        inventory_log.change_type.value,
+                    ),
+                    "qty_before": int(inventory_log.qty_before or 0),
+                    "change_qty": int(inventory_log.change_qty or 0),
+                    "qty_after": int(inventory_log.qty_after or 0),
+                    "note": inventory_log.note,
+                    "occurred_at": inventory_log.occurred_at,
+                }
+            )
+
+        return {"items": items}
+
 
     @staticmethod
     def update_live_inventory_row(
