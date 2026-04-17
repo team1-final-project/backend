@@ -232,6 +232,7 @@ class AdminProductAiPricingUpdateResponse(BaseModel):
     ai_pricing_enabled: bool
     message: str
 
+
 class AdminMatchingSummaryPeriodResponse(BaseModel):
     start_date: date
     end_date: date
@@ -252,3 +253,21 @@ class AdminMatchingSummaryResponse(BaseModel):
     current_period: AdminMatchingSummaryPeriodResponse
     previous_period: AdminMatchingSummaryPeriodResponse
     summary: AdminMatchingSummaryDataResponse
+
+
+class AdminInventoryHistorySummaryResponse(BaseModel):
+    total_count: int
+    total_diff: int
+    inbound_sku_count: int
+    inbound_qty: int
+    inbound_sku_diff: int
+    inbound_qty_diff: int
+    outbound_sku_count: int
+    outbound_qty: int
+    outbound_sku_diff: int
+    outbound_qty_diff: int
+
+
+class AdminLiveInventorySummaryResponse(BaseModel):
+    total_count: int
+    total_diff: int

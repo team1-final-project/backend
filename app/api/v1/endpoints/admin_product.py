@@ -24,6 +24,8 @@ from app.schemas.admin_product import (
     AdminInboundCreateRequest,
     AdminInboundCreateResponse,
     AdminInventoryHistoryListResponse,
+    AdminLiveInventorySummaryResponse,
+    AdminInventoryHistorySummaryResponse,
 )
 from app.services.admin_product_service import AdminProductService
 from app.services.cloudinary_service import CloudinaryService
@@ -70,6 +72,7 @@ def read_admin_price_search_list(
 ):
     return AdminProductService.list_price_search_items(db, current_user)
 
+
 @router.get(
     "/matching/summary",
     response_model=AdminMatchingSummaryResponse,
@@ -83,12 +86,41 @@ def read_admin_matching_summary(
         current_user=current_user,
     )
 
+
 @router.get("/live-inventory/list", response_model=AdminLiveInventoryListResponse)
 def read_admin_live_inventory_list(
     db: Session = Depends(get_db),
     current_user: Member = Depends(get_current_active_user),
 ):
     return AdminProductService.list_live_inventory_items(db, current_user)
+
+
+@router.get(
+    "/live-inventory/summary",
+    response_model=AdminLiveInventorySummaryResponse,
+)
+def read_admin_live_inventory_summary(
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.get_live_inventory_summary(db, current_user)
+
+
+@router.get(
+    "/inventory-history/summary",
+    response_model=AdminInventoryHistorySummaryResponse,
+)
+def read_admin_inventory_history_summary(
+    db: Session = Depends(get_db),
+    days: int = Query(7, ge=1, le=365),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.get_inventory_history_summary(
+        db=db,
+        current_user=current_user,
+        days=days,
+    )
+
 
 @router.post("/inbound", response_model=AdminInboundCreateResponse, status_code=201)
 def create_admin_inbound(
@@ -101,6 +133,7 @@ def create_admin_inbound(
         current_user=current_user,
         payload=payload,
     )
+
 
 @router.get(
     "/inventory-history/list",
@@ -201,6 +234,7 @@ def get_catalog_name(
         "external_catalog_id": external_catalog_id,
         "catalog_name": catalog_name,
     }
+
 
 @router.patch(
     "/{product_id}/ai-pricing",

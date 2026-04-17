@@ -314,6 +314,22 @@ class AdminProductService:
         db.add(product)
         db.flush()
 
+        initial_stock_qty = int(payload.stock_qty or 0)
+
+        if initial_stock_qty > 0:
+            inventory_log = InventoryLog(
+                product_id=product.id,
+                change_type=InventoryChangeType.INBOUND,
+                qty_before=0,
+                change_qty=initial_stock_qty,
+                qty_after=initial_stock_qty,
+                related_order_item_id=None,
+                note="상품 최초 등록 초기재고",
+                created_by=current_user.id,
+                occurred_at=now_kst(),
+            )
+            db.add(inventory_log)
+
         if payload.thumbnail_image_url:
             db.add(
                 ProductImage(
@@ -568,6 +584,128 @@ class AdminProductService:
                 "ai_price_count": current_summary["ai_price_count"],
                 "ai_price_diff": current_summary["ai_price_count"] - previous_summary["ai_price_count"],
             },
+        }
+
+    @staticmethod
+    def get_inventory_history_summary(
+        db: Session,
+        current_user: Member,
+        days: int = 7,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        days = max(1, int(days))
+
+        today = now_kst().date()
+        current_start = today - timedelta(days=days - 1)
+        current_end = today
+
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=days - 1)
+
+        def summarize_period(start_date: date, end_date: date) -> dict:
+            inbound_records = (
+                db.query(InventoryLog, Product)
+                .join(Product, Product.id == InventoryLog.product_id)
+                .filter(
+                    Product.deleted_at.is_(None),
+                    InventoryLog.change_type == InventoryChangeType.INBOUND,
+                    func.date(InventoryLog.occurred_at) >= start_date,
+                    func.date(InventoryLog.occurred_at) <= end_date,
+                )
+                .all()
+            )
+
+            outbound_records = (
+                db.query(InventoryLog, Product)
+                .join(Product, Product.id == InventoryLog.product_id)
+                .filter(
+                    Product.deleted_at.is_(None),
+                    InventoryLog.change_type == InventoryChangeType.ORDER_OUT,
+                    func.date(InventoryLog.occurred_at) >= start_date,
+                    func.date(InventoryLog.occurred_at) <= end_date,
+                )
+                .all()
+            )
+
+            inbound_sku_count = len({product.product_code for _, product in inbound_records})
+            inbound_qty = sum(abs(int(log.change_qty or 0)) for log, _ in inbound_records)
+
+            outbound_sku_count = len({product.product_code for _, product in outbound_records})
+            outbound_qty = sum(abs(int(log.change_qty or 0)) for log, _ in outbound_records)
+
+            return {
+                "inbound_sku_count": inbound_sku_count,
+                "inbound_qty": inbound_qty,
+                "outbound_sku_count": outbound_sku_count,
+                "outbound_qty": outbound_qty,
+            }
+
+        current_summary = summarize_period(current_start, current_end)
+        previous_summary = summarize_period(previous_start, previous_end)
+
+        inbound_sku_count = current_summary["inbound_sku_count"]
+        inbound_qty = current_summary["inbound_qty"]
+        outbound_sku_count = current_summary["outbound_sku_count"]
+        outbound_qty = current_summary["outbound_qty"]
+
+        inbound_sku_diff = (
+            current_summary["inbound_sku_count"] - previous_summary["inbound_sku_count"]
+        )
+        inbound_qty_diff = (
+            current_summary["inbound_qty"] - previous_summary["inbound_qty"]
+        )
+        outbound_sku_diff = (
+            current_summary["outbound_sku_count"] - previous_summary["outbound_sku_count"]
+        )
+        outbound_qty_diff = (
+            current_summary["outbound_qty"] - previous_summary["outbound_qty"]
+        )
+
+        total_count = inbound_sku_count + outbound_sku_count
+        total_diff = inbound_qty - outbound_qty
+
+        return {
+            "total_count": total_count,
+            "total_diff": total_diff,
+            "inbound_sku_count": inbound_sku_count,
+            "inbound_qty": inbound_qty,
+            "inbound_sku_diff": inbound_sku_diff,
+            "inbound_qty_diff": inbound_qty_diff,
+            "outbound_sku_count": outbound_sku_count,
+            "outbound_qty": outbound_qty,
+            "outbound_sku_diff": outbound_sku_diff,
+            "outbound_qty_diff": outbound_qty_diff,
+        }
+
+    @staticmethod
+    def get_live_inventory_summary(
+        db: Session,
+        current_user: Member,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        today = now_kst().date()
+        yesterday = today - timedelta(days=1)
+
+        total_count = (
+            db.query(Product)
+            .filter(Product.deleted_at.is_(None))
+            .count()
+        )
+
+        yesterday_total_count = (
+            db.query(Product)
+            .filter(
+                Product.deleted_at.is_(None),
+                func.date(Product.created_at) <= yesterday,
+            )
+            .count()
+        )
+
+        return {
+            "total_count": total_count,
+            "total_diff": total_count - yesterday_total_count,
         }
 
     @staticmethod
@@ -922,7 +1060,6 @@ class AdminProductService:
 
         return {"items": items}
 
-
     @staticmethod
     def update_live_inventory_row(
         db: Session,
@@ -960,7 +1097,6 @@ class AdminProductService:
             "message": "실시간 재고 항목이 수정되었습니다.",
         }
 
-    
     @staticmethod
     def create_inbound(
         db: Session,
