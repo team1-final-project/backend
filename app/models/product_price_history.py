@@ -28,6 +28,12 @@ class ProductPriceHistory(BaseModel):
 
     remaining_stock = Column(Integer, nullable=False, default=0)
 
+    my_pack_count = Column(Integer, nullable=True)
+    my_unit_sale_price = Column(Integer, nullable=True)
+
+    market_pack_count = Column(Integer, nullable=True)
+    market_unit_sale_price = Column(Integer, nullable=True)
+
     change_source = Column(
         SqlEnum(PriceChangeSource, name="price_change_source_enum"),
         nullable=False,

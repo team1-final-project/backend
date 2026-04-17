@@ -18,6 +18,10 @@ from app.models.product import Product
 from app.models.catalog_product import CatalogProduct
 from app.models.product_price_history import ProductPriceHistory
 from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
+from app.services.utils.catalog_pricing_utils import (
+    parse_pack_count,
+    calculate_unit_sale_price,
+)
 
 logger = logging.getLogger(__name__)
 _scheduler_lock = asyncio.Lock()
@@ -35,10 +39,6 @@ def _get_price_change_limit(product: Product) -> float:
 
 
 def _get_market_info(db: Session, product: Product) -> tuple[float, str | None, str]:
-    """
-    외부 최저가 조회에 실패하면 예외를 발생시켜
-    해당 상품은 저장되지 않도록 한다.
-    """
     catalog_product_id = getattr(product, "catalog_product_id", None)
     if not catalog_product_id:
         raise ValueError(f"product_id={product.id}: catalog_product_id가 없습니다.")
@@ -70,14 +70,31 @@ def _get_market_info(db: Session, product: Product) -> tuple[float, str | None, 
 
     if market_lowest_price is None:
         raise ValueError(f"product_id={product.id}: 외부 최저가가 없습니다.")
+    
+    catalog.current_lowest_price = int(market_lowest_price)
 
-    return float(market_lowest_price), catalog_name, str(external_catalog_id)
+    if catalog_name:
+        catalog.catalog_name = catalog_name
+
+    pack_count = parse_pack_count(catalog_name)
+    catalog.pack_count = pack_count
+    catalog.current_lowest_price = int(market_lowest_price)
+    catalog.unit_sale_price = calculate_unit_sale_price(
+        market_lowest_price,
+        pack_count,
+    )
+
+    return catalog, float(market_lowest_price), catalog_name, str(external_catalog_id)
 
 def _build_history_row(
     product: Product,
     old_price: float,
     result: dict,
     market_lowest_price: Optional[float],
+    my_pack_count: int,
+    my_unit_sale_price: int,
+    market_pack_count: Optional[int],
+    market_unit_sale_price: Optional[int],
 ) -> ProductPriceHistory:
     previous_price = int(round(old_price))
     applied_price = int(round(float(result["change_price"])))
@@ -85,10 +102,10 @@ def _build_history_row(
     price_gap = applied_price - previous_price
     price_gap_rate = round((price_gap / previous_price) * 100, 2) if previous_price > 0 else 0.0
 
+    # 이제 최저가 여부는 "개당 가격" 기준
     is_lowest_price = False
-    if market_lowest_price is not None:
-        market_lowest_price = int(market_lowest_price)
-        is_lowest_price = applied_price <= market_lowest_price
+    if market_unit_sale_price is not None:
+        is_lowest_price = int(my_unit_sale_price) <= int(market_unit_sale_price)
 
     now = now_kst()
 
@@ -104,7 +121,7 @@ def _build_history_row(
         sales_per_hour=0,
 
         is_lowest_price=is_lowest_price,
-        market_lowest_price=market_lowest_price,
+        market_lowest_price=int(market_lowest_price) if market_lowest_price is not None else None,
 
         price_gap=price_gap,
         price_gap_rate=price_gap_rate,
@@ -112,7 +129,12 @@ def _build_history_row(
         min_price_limit=getattr(product, "min_price_limit", None),
         max_price_limit=getattr(product, "max_price_limit", None),
 
-        remaining_stock=product.stock_qty,
+        remaining_stock=int(product.stock_qty or 0),
+
+        my_pack_count=my_pack_count,
+        my_unit_sale_price=my_unit_sale_price,
+        market_pack_count=market_pack_count,
+        market_unit_sale_price=market_unit_sale_price,
 
         change_source=PriceChangeSource.AI,
         changed_by=None,
@@ -123,6 +145,13 @@ def _build_history_row(
     )
 
 def _process_one_product(db: Session, product: Product) -> None:
+    """
+    상품 1건 처리
+    - product 기준 값 읽기
+    - 카탈로그 크롤링 + catalog_product 최신화
+    - AI 가격 결정 (개당 최저가 기준)
+    - product / product_price_history 반영
+    """
     old_price = float(product.sale_price)
 
     keyword = getattr(product, "product_name", None)
@@ -136,8 +165,19 @@ def _process_one_product(db: Session, product: Product) -> None:
     if not product_code:
         raise ValueError(f"product_id={product.id}: product_code가 없습니다.")
 
-    market_lowest_price, catalog_name, external_catalog_id = _get_market_info(db, product)
+    my_pack_count = int(getattr(product, "pack_count", 1) or 1)
 
+    # 1) 카탈로그 크롤링 및 catalog_product 최신화
+    catalog, market_lowest_price, catalog_name, external_catalog_id = _get_market_info(db, product)
+
+    market_pack_count = int(getattr(catalog, "pack_count", 1) or 1)
+    market_unit_sale_price = (
+        int(getattr(catalog, "unit_sale_price", 0))
+        if getattr(catalog, "unit_sale_price", None) is not None
+        else None
+    )
+
+    # 2) AI 가격 결정
     result = predict_optimal_price(
         keyword=keyword,
         current_price=current_price,
@@ -147,22 +187,34 @@ def _process_one_product(db: Session, product: Product) -> None:
         current_stock=current_stock,
         safety_stock=safety_stock,
         good_id=str(product_code),
+        my_pack_count=my_pack_count,
         market_lowest_price=market_lowest_price,
+        market_unit_price=float(market_unit_sale_price) if market_unit_sale_price is not None else None,
         catalog_code=external_catalog_id,
         catalog_name=catalog_name,
     )
 
-    new_price = float(result["change_price"])
+    # 3) product 가격 반영
+    new_price = int(round(float(result["change_price"])))
     product.sale_price = new_price
+    product.unit_sale_price = calculate_unit_sale_price(
+        new_price,
+        my_pack_count,
+    )
 
     if hasattr(product, "u_date"):
         product.u_date = now_kst()
 
+    # 4) history 저장
     history = _build_history_row(
         product=product,
         old_price=old_price,
         result=result,
         market_lowest_price=market_lowest_price,
+        my_pack_count=my_pack_count,
+        my_unit_sale_price=int(product.unit_sale_price or 0),
+        market_pack_count=market_pack_count,
+        market_unit_sale_price=market_unit_sale_price,
     )
     db.add(history)
     

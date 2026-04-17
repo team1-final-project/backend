@@ -22,6 +22,10 @@ from app.schemas.admin_product import (
     AdminLiveInventoryUpdateRequest,
     AdminInboundCreateRequest,
 )
+from app.services.utils.catalog_pricing_utils import (
+    parse_pack_count,
+    calculate_unit_sale_price,
+)
 
 from app.repositories.catalog_product_repository import (
     get_catalog_product_by_external_catalog_id,
@@ -240,40 +244,6 @@ class AdminProductService:
                 detail="상품을 찾을 수 없습니다.",
             )
         return product
-    
-    # 입력한 상품명에서 개수 파싱
-    @staticmethod
-    def _parse_pack_count(product_name: str) -> int:
-        if not product_name:
-            return 1
-
-        text = re.sub(r"\s+", " ", product_name).strip()
-
-        patterns = [
-            r"(\d+)\s*개",
-            r"(\d+)\s*입",
-            r"(\d+)\s*팩",
-            r"(\d+)\s*봉",
-            r"(\d+)\s*포",
-            r"(\d+)\s*캔",
-            r"(\d+)\s*병",
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                value = int(match.group(1))
-                return value if value > 0 else 1
-
-        return 1
-    
-    # 개당 가격 계산
-    @staticmethod
-    def _calculate_unit_sale_price(sale_price: int, pack_count: int) -> int:
-        if pack_count <= 0:
-            return int(sale_price or 0)
-
-        return int((sale_price or 0) // pack_count)
 
     @staticmethod
     def create_product(
@@ -303,8 +273,8 @@ class AdminProductService:
         product_code = AdminProductService._normalize_product_code(payload.product_code)
         AdminProductService._ensure_product_code_unique(db, product_code)
 
-        pack_count = AdminProductService._parse_pack_count(payload.product_name)
-        unit_sale_price = AdminProductService._calculate_unit_sale_price(
+        pack_count = parse_pack_count(payload.product_name)
+        unit_sale_price = calculate_unit_sale_price(
             payload.sale_price,
             pack_count,
         )
@@ -559,8 +529,8 @@ class AdminProductService:
             category_text=category.full_path,
         )
 
-        pack_count = AdminProductService._parse_pack_count(payload.product_name)
-        unit_sale_price = AdminProductService._calculate_unit_sale_price(
+        pack_count = parse_pack_count(payload.product_name)
+        unit_sale_price = calculate_unit_sale_price(
             payload.sale_price,
             pack_count,
         )

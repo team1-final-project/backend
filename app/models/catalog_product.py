@@ -10,6 +10,8 @@ class CatalogProduct(BaseModel):
     catalog_name = Column(String(255), nullable=False)
     source = Column(String(50), nullable=True)
     category_text = Column(String(255), nullable=True)
+    pack_count = Column(Integer, nullable=False, default=1)
+    unit_sale_price = Column(Integer, nullable=False, default=0)
 
     current_lowest_price = Column(Integer, nullable=True)
     current_lowest_price_at = Column(DateTime, nullable=True)

@@ -218,6 +218,14 @@ def round_change_rate(old_price: float, new_price: float) -> float:
         return 0.0
     return round(((new_price - old_price) / old_price) * 100, 1)
 
+def to_unit_price(total_price: float, pack_count: int) -> float:
+    safe_pack_count = max(int(pack_count or 1), 1)
+    return float(total_price) / safe_pack_count
+
+
+def to_total_price(unit_price: float, pack_count: int) -> float:
+    safe_pack_count = max(int(pack_count or 1), 1)
+    return float(unit_price) * safe_pack_count
 
 def validate_price_inputs(
     current_price: float,
@@ -431,6 +439,8 @@ def decide_price(
     current_stock: float,
     safety_stock: float,
     market_lowest_price: Optional[float],
+    market_unit_price: Optional[float],
+    my_pack_count: int,
     good_id: str,
     recent_ratio: float,
 ) -> Dict[str, float]:
@@ -439,10 +449,11 @@ def decide_price(
     cache: Dict[float, Dict[str, float]] = {}
 
     if inventory_state == "high":
-        if market_lowest_price is not None:
-            market_lowest_price = float(market_lowest_price)
+        if market_unit_price is not None:
+            market_unit_price = float(market_unit_price)
+            current_unit_price = to_unit_price(current_price, my_pack_count)
 
-            if current_price <= market_lowest_price:
+            if current_unit_price <= market_unit_price:
                 candidates = generate_price_candidates(
                     current_price=current_price,
                     min_price_limit=min_price_limit,
@@ -451,9 +462,9 @@ def decide_price(
                     mode="up",
                 )
 
-                target_price = min(
+                target_total_price = min(
                     current_price + max_change,
-                    market_lowest_price,
+                    to_total_price(market_unit_price, my_pack_count),
                     max_price_limit,
                 )
 
@@ -464,11 +475,11 @@ def decide_price(
                 else:
                     final_price = pick_closest_candidate(
                         candidates,
-                        target_price,
+                        target_total_price,
                         prefer="higher",
                     )
 
-            elif current_price - max_change <= market_lowest_price:
+            elif to_unit_price(max(current_price - max_change, min_price_limit), my_pack_count) <= market_unit_price:
                 candidates = generate_price_candidates(
                     current_price=current_price,
                     min_price_limit=min_price_limit,
@@ -477,8 +488,10 @@ def decide_price(
                     mode="down",
                 )
 
-                target_price = floor_to_step(market_lowest_price - 1)
-                target_price = max(target_price, min_price_limit)
+                target_total_price = floor_to_step(
+                    to_total_price(market_unit_price, my_pack_count) - 1
+                )
+                target_total_price = max(target_total_price, min_price_limit)
 
                 if not candidates:
                     final_price = floor_to_step(
@@ -603,7 +616,9 @@ def predict_optimal_price(
     current_stock: float,
     safety_stock: float,
     good_id: str,
+    my_pack_count: int = 1,
     market_lowest_price: Optional[float] = None,
+    market_unit_price: Optional[float] = None,
     catalog_code: Optional[str] = None,
     catalog_name: Optional[str] = None,
     category_code: str = DEFAULT_CATEGORY_CODE,
@@ -630,6 +645,8 @@ def predict_optimal_price(
         current_stock=current_stock,
         safety_stock=safety_stock,
         market_lowest_price=market_lowest_price,
+        market_unit_price=market_unit_price,
+        my_pack_count=my_pack_count,
         good_id=good_id,
         recent_ratio=recent_ratio,
     )
