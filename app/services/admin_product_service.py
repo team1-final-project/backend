@@ -1,5 +1,4 @@
-import random
-import string
+import re
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, aliased
@@ -241,6 +240,40 @@ class AdminProductService:
                 detail="상품을 찾을 수 없습니다.",
             )
         return product
+    
+    # 입력한 상품명에서 개수 파싱
+    @staticmethod
+    def _parse_pack_count(product_name: str) -> int:
+        if not product_name:
+            return 1
+
+        text = re.sub(r"\s+", " ", product_name).strip()
+
+        patterns = [
+            r"(\d+)\s*개",
+            r"(\d+)\s*입",
+            r"(\d+)\s*팩",
+            r"(\d+)\s*봉",
+            r"(\d+)\s*포",
+            r"(\d+)\s*캔",
+            r"(\d+)\s*병",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                value = int(match.group(1))
+                return value if value > 0 else 1
+
+        return 1
+    
+    # 개당 가격 계산
+    @staticmethod
+    def _calculate_unit_sale_price(sale_price: int, pack_count: int) -> int:
+        if pack_count <= 0:
+            return int(sale_price or 0)
+
+        return int((sale_price or 0) // pack_count)
 
     @staticmethod
     def create_product(
@@ -270,6 +303,12 @@ class AdminProductService:
         product_code = AdminProductService._normalize_product_code(payload.product_code)
         AdminProductService._ensure_product_code_unique(db, product_code)
 
+        pack_count = AdminProductService._parse_pack_count(payload.product_name)
+        unit_sale_price = AdminProductService._calculate_unit_sale_price(
+            payload.sale_price,
+            pack_count,
+        )
+
         product = Product(
             product_code=product_code,
             product_name=payload.product_name.strip(),
@@ -280,6 +319,8 @@ class AdminProductService:
             description_html=payload.description_html,
             cost_price=payload.cost_price,
             sale_price=payload.sale_price,
+            unit_sale_price=unit_sale_price,
+            pack_count=pack_count,
             sale_status=payload.sale_status,
             ai_pricing_enabled=payload.ai_pricing_enabled,
             min_price_limit=(
@@ -518,6 +559,12 @@ class AdminProductService:
             category_text=category.full_path,
         )
 
+        pack_count = AdminProductService._parse_pack_count(payload.product_name)
+        unit_sale_price = AdminProductService._calculate_unit_sale_price(
+            payload.sale_price,
+            pack_count,
+        )
+
         product.product_name = payload.product_name.strip()
         product.category_id = category.id
         product.brand_id = brand.id if brand else None
@@ -526,6 +573,8 @@ class AdminProductService:
         product.description_html = payload.description_html
         product.cost_price = payload.cost_price
         product.sale_price = payload.sale_price
+        product.unit_sale_price = unit_sale_price
+        product.pack_count = pack_count
         product.sale_status = payload.sale_status
         product.ai_pricing_enabled = payload.ai_pricing_enabled
         product.min_price_limit = (

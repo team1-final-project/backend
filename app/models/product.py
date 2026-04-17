@@ -19,6 +19,8 @@ class Product(BaseModel):
 
     cost_price = Column(Integer, nullable=False, default=0)
     sale_price = Column(Integer, nullable=False)
+    unit_sale_price = Column(Integer, nullable=False, default=0)
+    pack_count = Column(Integer, nullable=False, default=1)
 
     sale_status = Column(
         SqlEnum(ProductSaleStatus, name="product_sale_status_enum"),
