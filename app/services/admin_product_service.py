@@ -314,6 +314,22 @@ class AdminProductService:
         db.add(product)
         db.flush()
 
+        initial_stock_qty = int(payload.stock_qty or 0)
+
+        if initial_stock_qty > 0:
+            inventory_log = InventoryLog(
+                product_id=product.id,
+                change_type=InventoryChangeType.INBOUND,
+                qty_before=0,
+                change_qty=initial_stock_qty,
+                qty_after=initial_stock_qty,
+                related_order_item_id=None,
+                note="상품 최초 등록 초기재고",
+                created_by=current_user.id,
+                occurred_at=now_kst(),
+            )
+            db.add(inventory_log)
+
         if payload.thumbnail_image_url:
             db.add(
                 ProductImage(
