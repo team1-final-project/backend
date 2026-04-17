@@ -14,6 +14,7 @@ from app.schemas.admin_product import (
     AdminProductUpdateResponse,
     AdminProductAiPricingUpdateRequest,
     AdminProductAiPricingUpdateResponse,
+    AdminMatchingSummaryResponse,
     ProductImageUploadResponse,
     CatalogNameResolveResponse,
     AdminProductListResponse,
@@ -69,6 +70,18 @@ def read_admin_price_search_list(
 ):
     return AdminProductService.list_price_search_items(db, current_user)
 
+@router.get(
+    "/matching/summary",
+    response_model=AdminMatchingSummaryResponse,
+)
+def read_admin_matching_summary(
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.get_matching_summary(
+        db=db,
+        current_user=current_user,
+    )
 
 @router.get("/live-inventory/list", response_model=AdminLiveInventoryListResponse)
 def read_admin_live_inventory_list(

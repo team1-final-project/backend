@@ -231,3 +231,24 @@ class AdminProductAiPricingUpdateResponse(BaseModel):
     product_code: str
     ai_pricing_enabled: bool
     message: str
+
+class AdminMatchingSummaryPeriodResponse(BaseModel):
+    start_date: date
+    end_date: date
+
+
+class AdminMatchingSummaryDataResponse(BaseModel):
+    total_count: int
+    total_diff: int
+    matched_count: int
+    matched_diff: int
+    unmatched_count: int
+    unmatched_diff: int
+    ai_price_count: int
+    ai_price_diff: int
+
+
+class AdminMatchingSummaryResponse(BaseModel):
+    current_period: AdminMatchingSummaryPeriodResponse
+    previous_period: AdminMatchingSummaryPeriodResponse
+    summary: AdminMatchingSummaryDataResponse

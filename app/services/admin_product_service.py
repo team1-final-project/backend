@@ -502,6 +502,75 @@ class AdminProductService:
         return {"items": items}
 
     @staticmethod
+    def get_matching_summary(
+        db: Session,
+        current_user: Member,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        today = now_kst().date()
+
+        current_end = today
+        current_start = today - timedelta(days=6)
+
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=6)
+
+        def count_summary(start_date: date, end_date: date) -> dict:
+            records = (
+                db.query(Product, CatalogProduct)
+                .outerjoin(CatalogProduct, Product.catalog_product_id == CatalogProduct.id)
+                .filter(
+                    Product.deleted_at.is_(None),
+                    func.date(Product.updated_at) >= start_date,
+                    func.date(Product.updated_at) <= end_date,
+                )
+                .all()
+            )
+
+            total_count = len(records)
+            matched_count = sum(
+                1
+                for product, catalog in records
+                if catalog is not None and catalog.external_catalog_id
+            )
+            unmatched_count = total_count - matched_count
+            ai_price_count = sum(
+                1 for product, catalog in records if bool(product.ai_pricing_enabled)
+            )
+
+            return {
+                "total_count": total_count,
+                "matched_count": matched_count,
+                "unmatched_count": unmatched_count,
+                "ai_price_count": ai_price_count,
+            }
+
+        current_summary = count_summary(current_start, current_end)
+        previous_summary = count_summary(previous_start, previous_end)
+
+        return {
+            "current_period": {
+                "start_date": current_start,
+                "end_date": current_end,
+            },
+            "previous_period": {
+                "start_date": previous_start,
+                "end_date": previous_end,
+            },
+            "summary": {
+                "total_count": current_summary["total_count"],
+                "total_diff": current_summary["total_count"] - previous_summary["total_count"],
+                "matched_count": current_summary["matched_count"],
+                "matched_diff": current_summary["matched_count"] - previous_summary["matched_count"],
+                "unmatched_count": current_summary["unmatched_count"],
+                "unmatched_diff": current_summary["unmatched_count"] - previous_summary["unmatched_count"],
+                "ai_price_count": current_summary["ai_price_count"],
+                "ai_price_diff": current_summary["ai_price_count"] - previous_summary["ai_price_count"],
+            },
+        }
+
+    @staticmethod
     def update_product(
         db: Session,
         current_user: Member,
