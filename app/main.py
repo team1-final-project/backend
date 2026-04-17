@@ -70,7 +70,7 @@ app.add_middleware(
 #     allow_headers=["*"],
 # )
 
-# Base.metadata.drop_all(bind=engine)
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 app.include_router(api_router, prefix="/api/v1")
