@@ -33,32 +33,54 @@ def _parse_catalog_name_from_text(text: str) -> str | None:
     if not text:
         return None
 
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    stop_words = [
+        "카탈로그",
+        "평점", "최저", "최저가", "배송비포함", "배송", "무료",
+        "리뷰", "찜", "수량", "공식인증", "구매가기", "kcal", "로딩 중"
+    ]
 
-    for i, line in enumerate(lines):
-        if "브랜드 카탈로그" in line:
-            for j in range(i + 1, min(i + 6, len(lines))):
-                candidate = lines[j]
+    leading_noise_words = [
+        "장바구니", "마이쇼핑", "카테고리",
+        "검색영역", "검색레이어", "검색",
+        "가격비교", "네이버페이", "네이버", "NAVER",
+        "로그인", "서비스", "더보기", "사용자", "링크"
+    ]
 
-                excluded_keywords = [
-                    "리뷰", "찜", "최저", "원", "배송", "무료",
-                    "구매가기", "공식인증", "수량", "kcal", "로딩 중"
-                ]
-                if any(keyword in candidate for keyword in excluded_keywords):
-                    continue
+    normalized = re.sub(r"\s+", " ", text).strip()
 
-                if len(candidate) >= 3:
-                    return candidate
-
-    normalized = re.sub(r"\s+", " ", text)
-    match = re.search(
-        r"브랜드\s*카탈로그\s*(.+?)(?:최저|배송|리뷰|찜|수량|공식인증|구매가기)",
-        normalized
-    )
+    match = re.search(r"브랜드\s*카탈로그\s*(.+)", normalized)
     if match:
-        return match.group(1).strip()
+        candidate = match.group(1).strip()
+    else:
+        candidate = normalized
 
-    return None
+    # stop word가 나오면 거기서 끊기
+    cut_positions = [candidate.find(word) for word in stop_words if word in candidate]
+    if cut_positions:
+        candidate = candidate[:min(cut_positions)].strip()
+
+    # 앞쪽 UI 문구 제거: 마지막 노이즈 단어 뒤만 남김
+    last_noise_end = -1
+    for word in leading_noise_words:
+        idx = candidate.rfind(word)
+        if idx != -1:
+            last_noise_end = max(last_noise_end, idx + len(word))
+
+    if last_noise_end != -1:
+        candidate = candidate[last_noise_end:].strip()
+
+    # 리뷰 꼬리 제거
+    candidate = re.sub(r"\s*\d+건.*$", "", candidate).strip()
+
+    # 숫자만 남은 경우 버림
+    if re.fullmatch(r"[\d.]+", candidate):
+        return None
+
+    # 한글/영문이 있어야 상품명으로 인정
+    if not re.search(r"[A-Za-z가-힣]", candidate):
+        return None
+
+    return candidate or None
 
 
 # 크롤링 드라이버 초기화

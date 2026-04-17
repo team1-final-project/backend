@@ -25,7 +25,7 @@ LOW_STOCK_MULTIPLIER = 1.2
 DEFAULT_CATEGORY_CODE = "50000006"
 
 BRAND_PREFIXES = [
-    "CJ", "CJ제일제당", "오뚜기", "농심", "삼양", "팔도", "롯데", "코카콜라"
+    "CJ", "CJ제일제당", "오뚜기", "농심", "삼양", "팔도", "롯데", "코카콜라", "양반"
 ]
 
 PACK_PATTERNS = [
