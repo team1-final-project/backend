@@ -1,8 +1,8 @@
 {
-  "is_running": true,
-  "pid": 17436,
-  "started_at": "2026-04-20T12:11:23.595337",
-  "stopped_at": null,
-  "last_cycle_at": "2026-04-20T12:28:41.279674",
-  "last_message": "사이클 완료 - processed=2, updated=2, total_sold_qty=26"
+  "is_running": false,
+  "pid": null,
+  "started_at": "2026-04-20T16:38:34.144036",
+  "stopped_at": "2026-04-20T16:41:22.928074",
+  "last_cycle_at": "2026-04-20T16:41:09.269790",
+  "last_message": "시뮬레이터가 종료되었습니다."
 }
