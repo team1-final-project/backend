@@ -56,3 +56,104 @@ class AdminAiPriceHistoryDetailResponse(BaseModel):
     catalog: AdminAiPriceHistoryCatalogResponse
     histories: list[AdminAiPriceHistoryItemResponse] = Field(default_factory=list)
     history_count: int
+
+class AdminSalesSummaryResponse(BaseModel):
+    compare_label: str
+
+    gmv: int
+    gmv_change_rate: float
+
+    sales_volume: int
+    sales_volume_change_rate: float
+
+    contribution_profit: int
+    contribution_profit_change_rate: float
+
+    avg_contribution_margin: float
+    avg_contribution_margin_change_rate: float
+
+
+class AdminSalesCategoryTrendItemResponse(BaseModel):
+    label: str
+    sales: int
+    profit: int
+
+
+class AdminSalesCategoryShareItemResponse(BaseModel):
+    name: str
+    value: float
+
+
+class AdminSalesHourlyItemResponse(BaseModel):
+    time: str
+    lowest_price: int
+    my_price: int
+    sales: int
+    profit: int
+
+
+class AdminSalesHourlyResponse(BaseModel):
+    product_code: str | None = None
+    product_name: str | None = None
+    items: list[AdminSalesHourlyItemResponse] = Field(default_factory=list)
+
+
+class AdminBadInventoryItemResponse(BaseModel):
+    product_code: str
+    product_name: str
+    sale_price: int
+    stock_days: int
+    category: str | None = None
+
+
+class AdminSalesProductMixItemResponse(BaseModel):
+    label: str
+    sales: int
+    profit: int
+    discount: int
+
+
+class AdminSalesRankingItemResponse(BaseModel):
+    rank: int
+    product_code: str
+    product_name: str
+    category: str | None = None
+
+    sales: int | None = None
+    avg_sales: int | None = None
+
+    revenue: int | None = None
+    avg_revenue: int | None = None
+
+    contribution_profit: int | None = None
+    avg_contribution_profit: int | None = None
+
+    compare_rate: float | None = None
+
+    avg_price: int | None = None
+    avg_profit: int | None = None
+    avg_margin: float | None = None
+
+    original_price: int | None = None
+    changed_price: int | None = None
+    drop_amount: int | None = None
+
+
+class AdminSalesRankingResponse(BaseModel):
+    compare_label: str
+    items: list[AdminSalesRankingItemResponse] = Field(default_factory=list)
+
+
+class AdminSalesStatResponse(BaseModel):
+    mode: str
+    period: str
+
+    category_options: list[str] = Field(default_factory=list)
+
+    summary: AdminSalesSummaryResponse
+    category_trend: list[AdminSalesCategoryTrendItemResponse] = Field(default_factory=list)
+    category_share: list[AdminSalesCategoryShareItemResponse] = Field(default_factory=list)
+    hourly: AdminSalesHourlyResponse
+    bad_inventory: list[AdminBadInventoryItemResponse] = Field(default_factory=list)
+    product_mix: list[AdminSalesProductMixItemResponse] = Field(default_factory=list)
+    ranking: AdminSalesRankingResponse
