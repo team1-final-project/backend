@@ -238,15 +238,18 @@ class AdminMatchingSummaryPeriodResponse(BaseModel):
     end_date: date
 
 
+class AdminMatchingSummaryCardResponse(BaseModel):
+    value: int
+    change: int
+    change_label: str
+    up: bool
+
+
 class AdminMatchingSummaryDataResponse(BaseModel):
-    total_count: int
-    total_diff: int
-    matched_count: int
-    matched_diff: int
-    unmatched_count: int
-    unmatched_diff: int
-    ai_price_count: int
-    ai_price_diff: int
+    total_products: AdminMatchingSummaryCardResponse
+    ai_pricing_products: AdminMatchingSummaryCardResponse
+    matched_products: AdminMatchingSummaryCardResponse
+    unmatched_products: AdminMatchingSummaryCardResponse
 
 
 class AdminMatchingSummaryResponse(BaseModel):

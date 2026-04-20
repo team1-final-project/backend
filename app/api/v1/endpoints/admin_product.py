@@ -112,13 +112,11 @@ def read_admin_live_inventory_summary(
 )
 def read_admin_inventory_history_summary(
     db: Session = Depends(get_db),
-    days: int = Query(7, ge=1, le=365),
     current_user: Member = Depends(get_current_active_user),
 ):
     return AdminProductService.get_inventory_history_summary(
         db=db,
         current_user=current_user,
-        days=days,
     )
 
 

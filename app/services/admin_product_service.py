@@ -196,7 +196,7 @@ class AdminProductService:
             )
 
         return category
-    
+
     @staticmethod
     def _normalize_product_code(product_code: str) -> str:
         code = product_code.strip()
@@ -532,18 +532,7 @@ class AdminProductService:
         previous_end = current_start - timedelta(days=1)
         previous_start = previous_end - timedelta(days=6)
 
-        def count_summary(start_date: date, end_date: date) -> dict:
-            records = (
-                db.query(Product, CatalogProduct)
-                .outerjoin(CatalogProduct, Product.catalog_product_id == CatalogProduct.id)
-                .filter(
-                    Product.deleted_at.is_(None),
-                    func.date(Product.updated_at) >= start_date,
-                    func.date(Product.updated_at) <= end_date,
-                )
-                .all()
-            )
-
+        def summarize_records(records) -> dict:
             total_count = len(records)
             matched_count = sum(
                 1
@@ -562,8 +551,37 @@ class AdminProductService:
                 "ai_price_count": ai_price_count,
             }
 
-        current_summary = count_summary(current_start, current_end)
-        previous_summary = count_summary(previous_start, previous_end)
+        current_records = (
+            db.query(Product, CatalogProduct)
+            .outerjoin(CatalogProduct, Product.catalog_product_id == CatalogProduct.id)
+            .filter(Product.deleted_at.is_(None))
+            .all()
+        )
+
+        previous_records = (
+            db.query(Product, CatalogProduct)
+            .outerjoin(CatalogProduct, Product.catalog_product_id == CatalogProduct.id)
+            .filter(
+                Product.deleted_at.is_(None),
+                func.date(Product.updated_at) >= previous_start,
+                func.date(Product.updated_at) <= previous_end,
+            )
+            .all()
+        )
+
+        current_summary = summarize_records(current_records)
+        previous_summary = summarize_records(previous_records)
+
+        total_diff = current_summary["total_count"] - previous_summary["total_count"]
+        matched_diff = (
+            current_summary["matched_count"] - previous_summary["matched_count"]
+        )
+        unmatched_diff = (
+            current_summary["unmatched_count"] - previous_summary["unmatched_count"]
+        )
+        ai_price_diff = (
+            current_summary["ai_price_count"] - previous_summary["ai_price_count"]
+        )
 
         return {
             "current_period": {
@@ -575,14 +593,30 @@ class AdminProductService:
                 "end_date": previous_end,
             },
             "summary": {
-                "total_count": current_summary["total_count"],
-                "total_diff": current_summary["total_count"] - previous_summary["total_count"],
-                "matched_count": current_summary["matched_count"],
-                "matched_diff": current_summary["matched_count"] - previous_summary["matched_count"],
-                "unmatched_count": current_summary["unmatched_count"],
-                "unmatched_diff": current_summary["unmatched_count"] - previous_summary["unmatched_count"],
-                "ai_price_count": current_summary["ai_price_count"],
-                "ai_price_diff": current_summary["ai_price_count"] - previous_summary["ai_price_count"],
+                "total_products": {
+                    "value": current_summary["total_count"],
+                    "change": total_diff,
+                    "change_label": "vs last 7 days",
+                    "up": total_diff >= 0,
+                },
+                "ai_pricing_products": {
+                    "value": current_summary["ai_price_count"],
+                    "change": ai_price_diff,
+                    "change_label": "vs last 7 days",
+                    "up": ai_price_diff >= 0,
+                },
+                "matched_products": {
+                    "value": current_summary["matched_count"],
+                    "change": matched_diff,
+                    "change_label": "vs last 7 days",
+                    "up": matched_diff >= 0,
+                },
+                "unmatched_products": {
+                    "value": current_summary["unmatched_count"],
+                    "change": unmatched_diff,
+                    "change_label": "vs last 7 days",
+                    "up": unmatched_diff >= 0,
+                },
             },
         }
 
@@ -590,28 +624,20 @@ class AdminProductService:
     def get_inventory_history_summary(
         db: Session,
         current_user: Member,
-        days: int = 7,
     ) -> dict:
         AdminProductService._ensure_admin(current_user)
 
-        days = max(1, int(days))
-
         today = now_kst().date()
-        current_start = today - timedelta(days=days - 1)
-        current_end = today
+        yesterday = today - timedelta(days=1)
 
-        previous_end = current_start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=days - 1)
-
-        def summarize_period(start_date: date, end_date: date) -> dict:
+        def summarize_period(target_date: date) -> dict:
             inbound_records = (
                 db.query(InventoryLog, Product)
                 .join(Product, Product.id == InventoryLog.product_id)
                 .filter(
                     Product.deleted_at.is_(None),
                     InventoryLog.change_type == InventoryChangeType.INBOUND,
-                    func.date(InventoryLog.occurred_at) >= start_date,
-                    func.date(InventoryLog.occurred_at) <= end_date,
+                    func.date(InventoryLog.occurred_at) == target_date,
                 )
                 .all()
             )
@@ -622,17 +648,24 @@ class AdminProductService:
                 .filter(
                     Product.deleted_at.is_(None),
                     InventoryLog.change_type == InventoryChangeType.ORDER_OUT,
-                    func.date(InventoryLog.occurred_at) >= start_date,
-                    func.date(InventoryLog.occurred_at) <= end_date,
+                    func.date(InventoryLog.occurred_at) == target_date,
                 )
                 .all()
             )
 
-            inbound_sku_count = len({product.product_code for _, product in inbound_records})
-            inbound_qty = sum(abs(int(log.change_qty or 0)) for log, _ in inbound_records)
+            inbound_sku_count = len(
+                {product.product_code for _, product in inbound_records}
+            )
+            inbound_qty = sum(
+                abs(int(log.change_qty or 0)) for log, _ in inbound_records
+            )
 
-            outbound_sku_count = len({product.product_code for _, product in outbound_records})
-            outbound_qty = sum(abs(int(log.change_qty or 0)) for log, _ in outbound_records)
+            outbound_sku_count = len(
+                {product.product_code for _, product in outbound_records}
+            )
+            outbound_qty = sum(
+                abs(int(log.change_qty or 0)) for log, _ in outbound_records
+            )
 
             return {
                 "inbound_sku_count": inbound_sku_count,
@@ -641,8 +674,8 @@ class AdminProductService:
                 "outbound_qty": outbound_qty,
             }
 
-        current_summary = summarize_period(current_start, current_end)
-        previous_summary = summarize_period(previous_start, previous_end)
+        current_summary = summarize_period(today)
+        previous_summary = summarize_period(yesterday)
 
         inbound_sku_count = current_summary["inbound_sku_count"]
         inbound_qty = current_summary["inbound_qty"]
@@ -656,7 +689,8 @@ class AdminProductService:
             current_summary["inbound_qty"] - previous_summary["inbound_qty"]
         )
         outbound_sku_diff = (
-            current_summary["outbound_sku_count"] - previous_summary["outbound_sku_count"]
+            current_summary["outbound_sku_count"]
+            - previous_summary["outbound_sku_count"]
         )
         outbound_qty_diff = (
             current_summary["outbound_qty"] - previous_summary["outbound_qty"]
@@ -688,11 +722,7 @@ class AdminProductService:
         today = now_kst().date()
         yesterday = today - timedelta(days=1)
 
-        total_count = (
-            db.query(Product)
-            .filter(Product.deleted_at.is_(None))
-            .count()
-        )
+        total_count = db.query(Product).filter(Product.deleted_at.is_(None)).count()
 
         yesterday_total_count = (
             db.query(Product)
@@ -915,11 +945,14 @@ class AdminProductService:
                     "product_code": product.product_code,
                     "product_name": product.product_name,
                     "category_id": product.category_id,
-                    "category_name": getattr(category, "full_path", None) or category.name,
+                    "category_name": getattr(category, "full_path", None)
+                    or category.name,
                     "sale_price": product.sale_price,
                     "ai_pricing_enabled": bool(product.ai_pricing_enabled),
                     "stock_qty": product.stock_qty,
-                    "sale_status": product.sale_status.value if product.sale_status else None,
+                    "sale_status": (
+                        product.sale_status.value if product.sale_status else None
+                    ),
                     "updated_at": product.updated_at,
                 }
             )
@@ -1032,10 +1065,9 @@ class AdminProductService:
             end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
             query = query.filter(InventoryLog.occurred_at < end_datetime)
 
-        records = (
-            query.order_by(InventoryLog.occurred_at.desc(), InventoryLog.id.desc())
-            .all()
-        )
+        records = query.order_by(
+            InventoryLog.occurred_at.desc(), InventoryLog.id.desc()
+        ).all()
 
         items = []
         for inventory_log, product in records:
