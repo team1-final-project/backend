@@ -23,3 +23,6 @@ conda-meta/
 # OS
 .DS_Store
 Thumbs.db
+
+# simul
+.runtime/
