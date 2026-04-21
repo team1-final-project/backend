@@ -38,7 +38,10 @@ def _get_price_change_limit(product: Product) -> float:
     return float(value)
 
 
-def _get_market_info(db: Session, product: Product) -> tuple[float, str | None, str]:
+def _get_market_info(
+    db: Session,
+    product: Product,
+) -> tuple[CatalogProduct, float, str | None, str]:
     catalog_product_id = getattr(product, "catalog_product_id", None)
     if not catalog_product_id:
         raise ValueError(f"product_id={product.id}: catalog_product_id가 없습니다.")
@@ -128,6 +131,7 @@ def _build_history_row(
 
         min_price_limit=getattr(product, "min_price_limit", None),
         max_price_limit=getattr(product, "max_price_limit", None),
+        price_per_time=getattr(product, "price_per_time", None),
 
         remaining_stock=int(product.stock_qty or 0),
 

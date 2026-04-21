@@ -438,6 +438,7 @@ def _create_price_history_snapshot(
         price_gap_rate=price_gap_rate,
         min_price_limit=product.min_price_limit,
         max_price_limit=product.max_price_limit,
+        price_per_time=getattr(product, "price_per_time", None),
         remaining_stock=remaining_stock,
         my_pack_count=pack_count,
         my_unit_sale_price=my_unit_sale_price,

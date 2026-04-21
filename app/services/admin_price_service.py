@@ -211,6 +211,11 @@ class AdminPriceService:
                 if history.max_price_limit is not None
                 else None
             ),
+            "price_per_time": (
+                int(history.price_per_time)
+                if history.price_per_time is not None
+                else None
+            ),
             "remaining_stock": int(history.remaining_stock or 0),
             "my_pack_count": (
                 int(history.my_pack_count)

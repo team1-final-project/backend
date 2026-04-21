@@ -38,6 +38,7 @@ class AdminAiPriceHistoryItemResponse(BaseModel):
 
     min_price_limit: int | None = None
     max_price_limit: int | None = None
+    price_per_time: int | None = None
     remaining_stock: int
 
     my_pack_count: int | None = None
