@@ -1217,8 +1217,12 @@ class AdminPriceService:
                     "previous_sale_price": previous_sale_price,
                     "applied_sale_price": applied_sale_price,
                     "market_lowest_price": int(history.market_lowest_price or 0),
+                    "price_gap": int(history.price_gap or 0),
                     "sales_qty": int(history.sales_qty or 0),
                     "remaining_stock": remaining_stock,
+                    "safety_stock_qty": safety_stock_qty,
+                    "min_price_limit": int(history.min_price_limit) if history.min_price_limit is not None else None,
+                    "price_per_time": int(history.price_per_time) if history.price_per_time is not None else None,
                     "note": history.note,
                     "direction": (
                         "down"
@@ -1227,47 +1231,59 @@ class AdminPriceService:
                         if applied_sale_price > previous_sale_price
                         else "flat"
                     ),
-                    "fallback_reason": AdminPriceService._build_ai_reason_text(
-                        previous_sale_price=previous_sale_price,
-                        applied_sale_price=applied_sale_price,
-                        remaining_stock=remaining_stock,
-                        safety_stock_qty=safety_stock_qty,
-                        min_price_limit=int(history.min_price_limit) if history.min_price_limit is not None else None,
-                        max_price_limit=int(history.max_price_limit) if history.max_price_limit is not None else None,
-                    ),
                 }
             )
 
         return items
 
     @staticmethod
-    def _build_ai_reason_text(
+    def _build_ai_history_reason_text(
         *,
         previous_sale_price: int,
         applied_sale_price: int,
         remaining_stock: int,
         safety_stock_qty: int,
-        min_price_limit: int | None,
-        max_price_limit: int | None,
     ) -> str:
-        if min_price_limit is not None and applied_sale_price <= int(min_price_limit):
-            return "최저가 제한"
-
-        if max_price_limit is not None and applied_sale_price >= int(max_price_limit):
-            return "희망조정가 제한"
+        if safety_stock_qty > 0 and remaining_stock >= safety_stock_qty * 2:
+            if applied_sale_price <= previous_sale_price:
+                return "악성재고 가격인하"
 
         if safety_stock_qty > 0 and remaining_stock <= safety_stock_qty:
-            return (
-                "품절임박 가격인상"
-                if applied_sale_price >= previous_sale_price
-                else "품절임박 가격인하"
-            )
+            if applied_sale_price >= previous_sale_price:
+                return "품절임박 가격인상"
 
-        return (
-            "최저가변동 가격인상"
-            if applied_sale_price > previous_sale_price
-            else "최저가변동 가격인하"
-        )
+        if applied_sale_price < previous_sale_price:
+            return "최저가변동 가격인하"
+
+        return "최저가변동 가격인상"
+
+
+    @staticmethod
+    def _build_ai_strategy_reason_text(
+        *,
+        applied_sale_price: int,
+        market_lowest_price: int,
+        min_price_limit: int | None,
+        price_per_time: int | None,
+    ) -> str | None:
+        applied_sale_price = int(applied_sale_price or 0)
+        market_lowest_price = int(market_lowest_price or 0)
+        min_price_limit = int(min_price_limit) if min_price_limit is not None else None
+        step_limit = int(price_per_time or 0)
+
+        # 1. 최소가 제한에 이미 닿았거나 거의 근접한 경우
+        if min_price_limit is not None:
+            if applied_sale_price <= min_price_limit:
+                return "최저가 제한"
+
+            if step_limit > 0 and applied_sale_price - min_price_limit <= step_limit:
+                return "최저가 제한"
+
+        # 2. 시장 최저가보다 아직 비싸면 회당 조정가 제한 대상으로 본다
+        if market_lowest_price > 0 and applied_sale_price > market_lowest_price:
+            return "회당 조정가 제한"
+
+        return None
 
     @staticmethod
     def _manual_projection_factors(category_name: str) -> tuple[float, float, float]:
@@ -1469,13 +1485,20 @@ class AdminPriceService:
 
         items = []
         for index, row in enumerate(sorted_rows[:5], start=1):
+            reason = AdminPriceService._build_ai_history_reason_text(
+                previous_sale_price=row["previous_sale_price"],
+                applied_sale_price=row["applied_sale_price"],
+                remaining_stock=row["remaining_stock"],
+                safety_stock_qty=row["safety_stock_qty"],
+            )
+
             items.append(
                 {
                     "rank": index,
                     "occurred_at": row["logged_at"],
                     "product_code": row["product_code"],
                     "product_name": row["product_name"],
-                    "reason": row["note"] or row["fallback_reason"] or "AI 가격 조정",
+                    "reason": reason,
                     "direction": row["direction"],
                 }
             )
@@ -1494,14 +1517,9 @@ class AdminPriceService:
         for row in previous_order_rows:
             previous_grouped[row["product_code"]]["revenue"] += row["line_amount"]
 
-        latest_history_map = {}
-        for row in sorted(current_history_rows, key=lambda x: x["logged_at"], reverse=True):
-            if row["product_code"] not in latest_history_map:
-                latest_history_map[row["product_code"]] = row
-
-        grouped = {}
+        order_grouped = {}
         for row in current_order_rows:
-            target = grouped.setdefault(
+            target = order_grouped.setdefault(
                 row["product_code"],
                 {
                     "product_code": row["product_code"],
@@ -1513,7 +1531,6 @@ class AdminPriceService:
                     "avg_price_total": 0,
                     "avg_price_count": 0,
                     "stock": row["stock_qty"],
-                    "reason": "AI 가격 재검토",
                 },
             )
             target["revenue"] += row["line_amount"]
@@ -1521,37 +1538,93 @@ class AdminPriceService:
             target["sales_qty"] += row["quantity"]
             target["avg_price_total"] += row["unit_price"]
             target["avg_price_count"] += 1
+            target["stock"] = row["stock_qty"]
 
-            latest_history = latest_history_map.get(row["product_code"])
-            if latest_history:
-                target["stock"] = latest_history["remaining_stock"]
-                target["reason"] = latest_history["note"] or latest_history["fallback_reason"] or "AI 가격 재검토"
+        latest_history_map = {}
+        for row in sorted(current_history_rows, key=lambda x: x["logged_at"], reverse=True):
+            if row["product_code"] not in latest_history_map:
+                latest_history_map[row["product_code"]] = row
 
         items = []
-        for idx, item in enumerate(grouped.values(), start=1):
-            previous_revenue = previous_grouped[item["product_code"]]["revenue"]
-            compare_rate = AdminPriceService._safe_change_rate(item["revenue"], previous_revenue)
-            sale_price = round(item["avg_price_total"] / item["avg_price_count"]) if item["avg_price_count"] > 0 else 0
-            avg_profit = round(item["profit"] / item["sales_qty"]) if item["sales_qty"] > 0 else 0
-            margin = round((item["profit"] / item["revenue"]) * 100, 1) if item["revenue"] > 0 else 0.0
+
+        for product_code, latest_history in latest_history_map.items():
+            reason = AdminPriceService._build_ai_strategy_reason_text(
+                applied_sale_price=latest_history["applied_sale_price"],
+                market_lowest_price=latest_history["market_lowest_price"],
+                min_price_limit=latest_history["min_price_limit"],
+                price_per_time=latest_history["price_per_time"],
+            )
+
+            if not reason:
+                continue
+
+            order_info = order_grouped.get(
+                product_code,
+                {
+                    "product_code": latest_history["product_code"],
+                    "product_name": latest_history["product_name"],
+                    "category": latest_history["category_path"],
+                    "revenue": 0,
+                    "profit": 0,
+                    "sales_qty": int(latest_history["sales_qty"] or 0),
+                    "avg_price_total": int(latest_history["applied_sale_price"] or 0),
+                    "avg_price_count": 1,
+                    "stock": int(latest_history["remaining_stock"] or 0),
+                },
+            )
+
+            previous_revenue = previous_grouped[product_code]["revenue"]
+            compare_rate = AdminPriceService._safe_change_rate(
+                order_info["revenue"],
+                previous_revenue,
+            )
+
+            sale_price = (
+                round(order_info["avg_price_total"] / order_info["avg_price_count"])
+                if order_info["avg_price_count"] > 0
+                else int(latest_history["applied_sale_price"] or 0)
+            )
+
+            avg_profit = (
+                round(order_info["profit"] / order_info["sales_qty"])
+                if order_info["sales_qty"] > 0
+                else 0
+            )
+
+            margin = (
+                round((order_info["profit"] / order_info["revenue"]) * 100, 1)
+                if order_info["revenue"] > 0
+                else 0.0
+            )
 
             items.append(
                 {
-                    "rank": idx,
-                    "product_code": item["product_code"],
-                    "product_name": item["product_name"],
-                    "reason": item["reason"],
-                    "sales_qty": int(item["sales_qty"]),
-                    "stock": int(item["stock"]),
+                    "product_code": order_info["product_code"],
+                    "product_name": order_info["product_name"],
+                    "reason": reason,
+                    "sales_qty": int(order_info["sales_qty"]),
+                    "stock": int(order_info["stock"]),
                     "compare_rate": float(compare_rate),
                     "sale_price": int(sale_price),
                     "profit": int(avg_profit),
                     "margin": float(margin),
-                    "category": item["category"],
+                    "category": order_info["category"],
                 }
             )
 
-        items = sorted(items, key=lambda x: (x["compare_rate"], x["stock"]))[:5]
+        reason_priority = {
+            "최저가 제한": 0,
+            "회당 조정가 제한": 1,
+        }
+
+        items = sorted(
+            items,
+            key=lambda x: (
+                reason_priority.get(x["reason"], 99),
+                x["compare_rate"],
+                x["stock"],
+            ),
+        )[:5]
 
         for idx, item in enumerate(items, start=1):
             item["rank"] = idx

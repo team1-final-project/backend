@@ -262,27 +262,19 @@ def _build_ai_reason(
     applied_sale_price: int,
     remaining_stock: int,
     safety_stock_qty: int,
-    min_price_limit: int | None,
-    max_price_limit: int | None,
 ) -> str:
-    if min_price_limit is not None and applied_sale_price <= int(min_price_limit):
-        return "최저가 제한"
-
-    if max_price_limit is not None and applied_sale_price >= int(max_price_limit):
-        return "희망조정가 제한"
+    if safety_stock_qty > 0 and remaining_stock >= safety_stock_qty * 2:
+        if applied_sale_price <= previous_sale_price:
+            return "악성재고 가격인하"
 
     if safety_stock_qty > 0 and remaining_stock <= safety_stock_qty:
-        return (
-            "품절임박 가격인상"
-            if applied_sale_price >= previous_sale_price
-            else "품절임박 가격인하"
-        )
+        if applied_sale_price >= previous_sale_price:
+            return "품절임박 가격인상"
 
-    return (
-        "최저가변동 가격인상"
-        if applied_sale_price > previous_sale_price
-        else "최저가변동 가격인하"
-    )
+    if applied_sale_price < previous_sale_price:
+        return "최저가변동 가격인하"
+
+    return "최저가변동 가격인상"
 
 
 def _create_order_bundle(
@@ -420,8 +412,6 @@ def _create_price_history_snapshot(
         applied_sale_price=applied_sale_price,
         remaining_stock=remaining_stock,
         safety_stock_qty=int(product.safety_stock_qty or 0),
-        min_price_limit=product.min_price_limit,
-        max_price_limit=product.max_price_limit,
     )
 
     history = ProductPriceHistory(

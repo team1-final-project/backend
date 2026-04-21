@@ -89,6 +89,26 @@ def _get_market_info(
 
     return catalog, float(market_lowest_price), catalog_name, str(external_catalog_id)
 
+def _build_ai_history_reason(
+        *,
+        previous_price: int,
+        applied_price: int,
+        stock_qty: int,
+        safety_stock_qty: int,
+    ) -> str:
+        if safety_stock_qty > 0 and stock_qty >= safety_stock_qty * 2:
+            if applied_price <= previous_price:
+                return "악성재고 가격인하"
+
+        if safety_stock_qty > 0 and stock_qty <= safety_stock_qty:
+            if applied_price >= previous_price:
+                return "품절임박 가격인상"
+
+        if applied_price < previous_price:
+            return "최저가변동 가격인하"
+
+        return "최저가변동 가격인상"
+
 def _build_history_row(
     product: Product,
     old_price: float,
@@ -142,7 +162,12 @@ def _build_history_row(
 
         change_source=PriceChangeSource.AI,
         changed_by=None,
-        note="AI 자동 가격 조정",
+        note=_build_ai_history_reason(
+            previous_price=previous_price,
+            applied_price=applied_price,
+            stock_qty=int(product.stock_qty or 0),
+            safety_stock_qty=int(product.safety_stock_qty or 0),
+        ),
 
         created_at=now,
         updated_at=now,
