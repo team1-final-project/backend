@@ -44,6 +44,8 @@ class AdminProductCreateRequest(AdminProductBaseRequest):
 class AdminProductUpdateRequest(AdminProductBaseRequest):
     pass
 
+class AdminProductSaleStatusUpdateRequest(BaseModel):
+    sale_status: str
 
 class AdminProductCreateResponse(BaseModel):
     id: int
