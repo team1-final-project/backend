@@ -6,7 +6,7 @@ import os
 import random
 import string
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -180,11 +180,20 @@ def _select_simulation_member(db: Session) -> Member:
     raise RuntimeError("시뮬레이터 주문 생성에 사용할 member 데이터가 없습니다.")
 
 
-def _get_latest_history(db: Session, product_id: int) -> ProductPriceHistory | None:
+def _get_latest_history(
+    db: Session,
+    product_id: int,
+    as_of: datetime | None = None,
+) -> ProductPriceHistory | None:
+    query = db.query(ProductPriceHistory).filter(
+        ProductPriceHistory.product_id == product_id
+    )
+
+    if as_of is not None:
+        query = query.filter(ProductPriceHistory.logged_at <= as_of)
+
     return (
-        db.query(ProductPriceHistory)
-        .filter(ProductPriceHistory.product_id == product_id)
-        .order_by(
+        query.order_by(
             ProductPriceHistory.logged_at.desc(),
             ProductPriceHistory.id.desc(),
         )
@@ -358,7 +367,6 @@ def _create_price_history_snapshot(
     previous_sale_price: int,
     applied_sale_price: int,
     sold_qty: int,
-    remaining_stock: int,
 ) -> None:
     market_lowest_price = _simulate_market_lowest_price(
         product=product,
@@ -391,7 +399,7 @@ def _create_price_history_snapshot(
         price_gap_rate=price_gap_rate,
         min_price_limit=product.min_price_limit,
         max_price_limit=product.max_price_limit,
-        remaining_stock=remaining_stock,
+        remaining_stock=product.stock_qty,
         my_pack_count=pack_count,
         my_unit_sale_price=my_unit_sale_price,
         market_pack_count=market_pack_count,
@@ -403,7 +411,11 @@ def _create_price_history_snapshot(
     db.add(history)
 
 
-def _process_one_product_simulation(db: Session, product: Product) -> dict[str, int]:
+def _process_one_product_simulation(
+    db: Session,
+    product: Product,
+    simulated_at: datetime | None = None,
+) -> dict[str, int]:
     """
     상품 1건에 대해 판매/주문/결제/재고/가격이력을 함께 반영한다.
     반환값은 생성/변경 결과 요약.
@@ -426,10 +438,10 @@ def _process_one_product_simulation(db: Session, product: Product) -> dict[str, 
     product.sale_price = applied_sale_price
     product.unit_sale_price = _normalize_unit_price(applied_sale_price, int(product.pack_count or 1))
 
-    latest_history = _get_latest_history(db, product.id)
     sale_chunks = _split_quantity(total_sold_qty)
 
-    cycle_now = now_kst()
+    cycle_now = simulated_at or now_kst()
+    latest_history = _get_latest_history(db, product.id, as_of=cycle_now)
     created_order_count = 0
 
     for chunk_qty in sale_chunks:
@@ -471,7 +483,6 @@ def _process_one_product_simulation(db: Session, product: Product) -> dict[str, 
         previous_sale_price=previous_sale_price,
         applied_sale_price=applied_sale_price,
         sold_qty=total_sold_qty,
-        remaining_stock=int(product.stock_qty or 0),
     )
 
     return {
@@ -480,7 +491,9 @@ def _process_one_product_simulation(db: Session, product: Product) -> dict[str, 
     }
 
 
-def run_one_cycle_sync() -> dict[str, int]:
+def run_one_cycle_sync(
+    simulated_at: datetime | None = None,
+) -> dict[str, int]:
     """
     판매중(ON_SALE) 상품 전체를 한 번 순회한다.
     상품별로 주문/결제/재고/가격이력을 함께 생성한다.
@@ -510,7 +523,11 @@ def run_one_cycle_sync() -> dict[str, int]:
             processed_count += 1
 
             try:
-                result = _process_one_product_simulation(db, product)
+                result = _process_one_product_simulation(
+                    db,
+                    product,
+                    simulated_at=simulated_at,
+                )
                 db.commit()
 
                 sold_qty = int(result["sold_qty"])
@@ -661,3 +678,77 @@ def request_stop() -> dict[str, Any]:
 
 def get_status() -> dict[str, Any]:
     return _read_state()
+
+
+def _generate_backfill_timestamps(
+    period: str,
+    cycles_per_day: int = 3,
+) -> list[datetime]:
+    now = now_kst()
+
+    if period == "week":
+        total_days = 7
+    elif period == "month":
+        total_days = 30
+    else:
+        raise ValueError("period는 'week' 또는 'month'만 가능합니다.")
+
+    timestamps: list[datetime] = []
+
+    for day_offset in range(total_days, 0, -1):
+        base_day = (now - timedelta(days=day_offset)).date()
+
+        for _ in range(cycles_per_day):
+            hour = random.randint(9, 21)
+            minute = random.randint(0, 59)
+            second = random.randint(0, 59)
+
+            timestamps.append(
+                datetime(
+                    year=base_day.year,
+                    month=base_day.month,
+                    day=base_day.day,
+                    hour=hour,
+                    minute=minute,
+                    second=second,
+                    tzinfo=now.tzinfo,
+                )
+            )
+
+    timestamps.sort()
+    return timestamps
+
+
+def run_backfill_sync(
+    period: str,
+    cycles_per_day: int = 3,
+) -> dict[str, int]:
+    timestamps = _generate_backfill_timestamps(
+        period=period,
+        cycles_per_day=cycles_per_day,
+    )
+
+    total_cycles = 0
+    total_processed_count = 0
+    total_updated_count = 0
+    total_sold_qty = 0
+    total_order_count = 0
+
+    for simulated_at in timestamps:
+        result = run_one_cycle_sync(simulated_at=simulated_at)
+
+        total_cycles += 1
+        total_processed_count += int(result.get("processed_count", 0))
+        total_updated_count += int(result.get("updated_count", 0))
+        total_sold_qty += int(result.get("total_sold_qty", 0))
+        total_order_count += int(result.get("total_order_count", 0))
+
+    return {
+        "period": period,
+        "cycles_per_day": cycles_per_day,
+        "total_cycles": total_cycles,
+        "processed_count": total_processed_count,
+        "updated_count": total_updated_count,
+        "total_sold_qty": total_sold_qty,
+        "total_order_count": total_order_count,
+    }
