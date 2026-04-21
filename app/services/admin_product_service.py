@@ -537,22 +537,21 @@ class AdminProductService:
         previous_start = previous_end - timedelta(days=6)
 
         def summarize_records(records) -> dict:
-            total_count = len(records)
-            matched_count = sum(
-                1
-                for product, catalog in records
-                if catalog is not None and catalog.external_catalog_id
-            )
-            unmatched_count = total_count - matched_count
-            ai_price_count = sum(
-                1 for product, catalog in records if bool(product.ai_pricing_enabled)
-            )
-
             return {
-                "total_count": total_count,
-                "matched_count": matched_count,
-                "unmatched_count": unmatched_count,
-                "ai_price_count": ai_price_count,
+                "total_count": len(products),
+                "sale_count": sum(
+                    1
+                    for product in products
+                    if product.sale_status and product.sale_status.value == "ON_SALE"
+                ),
+                "sold_out_count": sum(
+                    1
+                    for product in products
+                    if product.sale_status and product.sale_status.value == "SOLD_OUT"
+                ),
+                "ai_enabled_count": sum(
+                    1 for product in products if bool(product.ai_pricing_enabled)
+                ),
             }
 
         current_records = (
@@ -872,6 +871,25 @@ class AdminProductService:
         }
 
     @staticmethod
+    def summarize_products(products: list[Product]) -> dict:
+        return {
+            "total_count": len(products),
+            "sale_count": sum(
+                1
+                for product in products
+                if product.sale_status and product.sale_status.value == "ON_SALE"
+            ),
+            "sold_out_count": sum(
+                1
+                for product in products
+                if product.sale_status and product.sale_status.value == "SOLD_OUT"
+            ),
+            "ai_enabled_count": sum(
+                1 for product in products if bool(product.ai_pricing_enabled)
+            ),
+        }
+
+    @staticmethod
     def get_product_list(
         db: Session,
         current_user: Member,
@@ -915,26 +933,74 @@ class AdminProductService:
             end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
             base_query = base_query.filter(Product.updated_at < end_datetime)
 
-        summary_products = [row[0] for row in base_query.all()]
+        # 요약카드는 검색/필터와 무관하게 전체 DB 기준
+        summary_products = (
+            db.query(Product)
+            .filter(Product.deleted_at.is_(None))
+            .all()
+        )
+        summary_snapshot = AdminProductService.summarize_products(summary_products)
+
+        # 최근 7일 / 이전 7일 변화량
+        today = now_kst().date()
+        current_start = today - timedelta(days=6)
+        current_end = today
+
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=6)
+
+        current_window_products = (
+            db.query(Product)
+            .filter(
+                Product.deleted_at.is_(None),
+                func.date(Product.updated_at) >= current_start,
+                func.date(Product.updated_at) <= current_end,
+            )
+            .all()
+        )
+
+        previous_window_products = (
+            db.query(Product)
+            .filter(
+                Product.deleted_at.is_(None),
+                func.date(Product.updated_at) >= previous_start,
+                func.date(Product.updated_at) <= previous_end,
+            )
+            .all()
+        )
+
+        current_window_summary = AdminProductService.summarize_products(
+            current_window_products
+        )
+        previous_window_summary = AdminProductService.summarize_products(
+            previous_window_products
+        )
 
         summary = {
-            "total_count": len(summary_products),
-            "sale_count": sum(
-                1
-                for product in summary_products
-                if product.sale_status and product.sale_status.value == "ON_SALE"
+            "total_count": summary_snapshot["total_count"],
+            "sale_count": summary_snapshot["sale_count"],
+            "sold_out_count": summary_snapshot["sold_out_count"],
+            "ai_enabled_count": summary_snapshot["ai_enabled_count"],
+            "total_diff": (
+                current_window_summary["total_count"]
+                - previous_window_summary["total_count"]
             ),
-            "sold_out_count": sum(
-                1
-                for product in summary_products
-                if product.sale_status and product.sale_status.value == "SOLD_OUT"
+            "sale_diff": (
+                current_window_summary["sale_count"]
+                - previous_window_summary["sale_count"]
             ),
-            "ai_enabled_count": sum(
-                1 for product in summary_products if bool(product.ai_pricing_enabled)
+            "sold_out_diff": (
+                current_window_summary["sold_out_count"]
+                - previous_window_summary["sold_out_count"]
+            ),
+            "ai_enabled_diff": (
+                current_window_summary["ai_enabled_count"]
+                - previous_window_summary["ai_enabled_count"]
             ),
         }
 
-        total = summary["total_count"]
+        # 목록 total/page는 현재 검색 조건 기준
+        total = base_query.count()
         total_pages = ceil(total / size) if total > 0 else 1
 
         rows = (

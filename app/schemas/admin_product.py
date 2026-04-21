@@ -122,6 +122,11 @@ class AdminProductListSummaryResponse(BaseModel):
     sold_out_count: int
     ai_enabled_count: int
 
+    total_diff: int
+    sale_diff: int
+    sold_out_diff: int
+    ai_enabled_diff: int
+
 
 class AdminProductListResponse(BaseModel):
     items: list[AdminProductListItemResponse]
