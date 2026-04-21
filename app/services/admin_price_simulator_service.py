@@ -256,6 +256,35 @@ def _simulate_market_lowest_price(
     return market_lowest_price
 
 
+def _build_ai_reason(
+    *,
+    previous_sale_price: int,
+    applied_sale_price: int,
+    remaining_stock: int,
+    safety_stock_qty: int,
+    min_price_limit: int | None,
+    max_price_limit: int | None,
+) -> str:
+    if min_price_limit is not None and applied_sale_price <= int(min_price_limit):
+        return "최저가 제한"
+
+    if max_price_limit is not None and applied_sale_price >= int(max_price_limit):
+        return "희망조정가 제한"
+
+    if safety_stock_qty > 0 and remaining_stock <= safety_stock_qty:
+        return (
+            "품절임박 가격인상"
+            if applied_sale_price >= previous_sale_price
+            else "품절임박 가격인하"
+        )
+
+    return (
+        "최저가변동 가격인상"
+        if applied_sale_price > previous_sale_price
+        else "최저가변동 가격인하"
+    )
+
+
 def _create_order_bundle(
     db: Session,
     *,
@@ -367,6 +396,7 @@ def _create_price_history_snapshot(
     previous_sale_price: int,
     applied_sale_price: int,
     sold_qty: int,
+    remaining_stock: int,
 ) -> None:
     market_lowest_price = _simulate_market_lowest_price(
         product=product,
@@ -385,6 +415,15 @@ def _create_price_history_snapshot(
     )
     market_unit_sale_price = _normalize_unit_price(market_lowest_price, market_pack_count)
 
+    reason = _build_ai_reason(
+        previous_sale_price=previous_sale_price,
+        applied_sale_price=applied_sale_price,
+        remaining_stock=remaining_stock,
+        safety_stock_qty=int(product.safety_stock_qty or 0),
+        min_price_limit=product.min_price_limit,
+        max_price_limit=product.max_price_limit,
+    )
+
     history = ProductPriceHistory(
         product_id=product.id,
         catalog_product_id=product.catalog_product_id,
@@ -399,14 +438,14 @@ def _create_price_history_snapshot(
         price_gap_rate=price_gap_rate,
         min_price_limit=product.min_price_limit,
         max_price_limit=product.max_price_limit,
-        remaining_stock=product.stock_qty,
+        remaining_stock=remaining_stock,
         my_pack_count=pack_count,
         my_unit_sale_price=my_unit_sale_price,
         market_pack_count=market_pack_count,
         market_unit_sale_price=market_unit_sale_price,
         change_source=PriceChangeSource.AI if product.ai_pricing_enabled else PriceChangeSource.MANUAL,
         changed_by=None,
-        note="판매 시뮬레이터 자동 스냅샷",
+        note=reason,
     )
     db.add(history)
 
@@ -483,6 +522,7 @@ def _process_one_product_simulation(
         previous_sale_price=previous_sale_price,
         applied_sale_price=applied_sale_price,
         sold_qty=total_sold_qty,
+        remaining_stock=int(product.stock_qty or 0),
     )
 
     return {

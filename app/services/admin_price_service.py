@@ -224,6 +224,8 @@ class AdminPriceService:
                 else None
             ),
             "market_unit_sale_price": market_unit_sale_price,
+            "reason": history.note,
+            "change_source": history.change_source.value if history.change_source else None,
         }
 
     @staticmethod
@@ -1115,5 +1117,576 @@ class AdminPriceService:
                 ranking_period=ranking_period,
                 start_date=start_date,
                 end_date=end_date,
+            ),
+        }
+    
+    @staticmethod
+    def _query_ai_order_rows(
+        db: Session,
+        start_dt: datetime,
+        end_dt: datetime,
+    ) -> list[dict]:
+        rows = (
+            db.query(OrderItem, Order, Product, Category)
+            .join(Order, OrderItem.order_id == Order.id)
+            .join(Product, OrderItem.product_id == Product.id)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .filter(
+                Product.deleted_at.is_(None),
+                Product.ai_pricing_enabled.is_(True),
+                Order.ordered_at >= start_dt,
+                Order.ordered_at < end_dt,
+                or_(
+                    Order.payment_status == PaymentStatus.APPROVED,
+                    Order.order_status == OrderStatus.PAID,
+                ),
+            )
+            .all()
+        )
+
+        items = []
+        for order_item, order, product, category in rows:
+            ordered_at = order.paid_at or order.ordered_at
+            items.append(
+                {
+                    "product_id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "category_name": AdminPriceService._leaf_category_name(category),
+                    "category_path": category.full_path if category and category.full_path else (category.name if category else "미분류"),
+                    "ordered_at": ordered_at,
+                    "unit_price": int(order_item.unit_price or 0),
+                    "quantity": int(order_item.quantity or 0),
+                    "line_amount": int(order_item.line_amount or 0),
+                    "cost_price": int(product.cost_price or 0),
+                    "stock_qty": int(product.stock_qty or 0),
+                    "safety_stock_qty": int(product.safety_stock_qty or 0),
+                    "min_price_limit": int(product.min_price_limit) if product.min_price_limit is not None else None,
+                    "max_price_limit": int(product.max_price_limit) if product.max_price_limit is not None else None,
+                }
+            )
+        return items
+
+
+    @staticmethod
+    def _query_ai_history_rows(
+        db: Session,
+        start_dt: datetime | None = None,
+        end_dt: datetime | None = None,
+    ) -> list[dict]:
+        query = (
+            db.query(ProductPriceHistory, Product, Category)
+            .join(Product, ProductPriceHistory.product_id == Product.id)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .filter(
+                Product.deleted_at.is_(None),
+                Product.ai_pricing_enabled.is_(True),
+                ProductPriceHistory.change_source == PriceChangeSource.AI,
+            )
+        )
+
+        if start_dt is not None:
+            query = query.filter(ProductPriceHistory.logged_at >= start_dt)
+        if end_dt is not None:
+            query = query.filter(ProductPriceHistory.logged_at < end_dt)
+
+        rows = query.all()
+
+        items = []
+        for history, product, category in rows:
+            previous_sale_price = int(history.previous_sale_price or 0)
+            applied_sale_price = int(history.applied_sale_price or 0)
+            remaining_stock = int(history.remaining_stock or 0)
+            safety_stock_qty = int(product.safety_stock_qty or 0)
+
+            items.append(
+                {
+                    "product_id": product.id,
+                    "product_code": product.product_code,
+                    "product_name": product.product_name,
+                    "category_name": AdminPriceService._leaf_category_name(category),
+                    "category_path": category.full_path if category and category.full_path else (category.name if category else "미분류"),
+                    "logged_at": history.logged_at,
+                    "previous_sale_price": previous_sale_price,
+                    "applied_sale_price": applied_sale_price,
+                    "market_lowest_price": int(history.market_lowest_price or 0),
+                    "sales_qty": int(history.sales_qty or 0),
+                    "remaining_stock": remaining_stock,
+                    "note": history.note,
+                    "direction": (
+                        "down"
+                        if applied_sale_price < previous_sale_price
+                        else "up"
+                        if applied_sale_price > previous_sale_price
+                        else "flat"
+                    ),
+                    "fallback_reason": AdminPriceService._build_ai_reason_text(
+                        previous_sale_price=previous_sale_price,
+                        applied_sale_price=applied_sale_price,
+                        remaining_stock=remaining_stock,
+                        safety_stock_qty=safety_stock_qty,
+                        min_price_limit=int(history.min_price_limit) if history.min_price_limit is not None else None,
+                        max_price_limit=int(history.max_price_limit) if history.max_price_limit is not None else None,
+                    ),
+                }
+            )
+
+        return items
+
+
+    @staticmethod
+    def _build_ai_reason_text(
+        *,
+        previous_sale_price: int,
+        applied_sale_price: int,
+        remaining_stock: int,
+        safety_stock_qty: int,
+        min_price_limit: int | None,
+        max_price_limit: int | None,
+    ) -> str:
+        if min_price_limit is not None and applied_sale_price <= int(min_price_limit):
+            return "최저가 제한"
+
+        if max_price_limit is not None and applied_sale_price >= int(max_price_limit):
+            return "희망조정가 제한"
+
+        if safety_stock_qty > 0 and remaining_stock <= safety_stock_qty:
+            return (
+                "품절임박 가격인상"
+                if applied_sale_price >= previous_sale_price
+                else "품절임박 가격인하"
+            )
+
+        return (
+            "최저가변동 가격인상"
+            if applied_sale_price > previous_sale_price
+            else "최저가변동 가격인하"
+        )
+
+
+    @staticmethod
+    def _manual_projection_factors(category_name: str) -> tuple[float, float, float]:
+        mapping = {
+            "라면": (0.94, 0.89, 0.93),
+            "소시지": (0.91, 0.87, 0.90),
+            "스낵과자": (0.93, 0.90, 0.92),
+            "즉석식품": (0.92, 0.88, 0.91),
+            "카레": (0.94, 0.90, 0.93),
+            "탄산음료": (0.95, 0.91, 0.94),
+        }
+        return mapping.get(category_name, (0.93, 0.89, 0.92))
+
+
+    @staticmethod
+    def _project_manual_metrics_from_row(row: dict) -> dict:
+        revenue_factor, profit_factor, sales_factor = AdminPriceService._manual_projection_factors(
+            row["category_name"]
+        )
+        variation_seed = ((row["ordered_at"].day + row["product_id"]) % 5) - 2
+        variation = variation_seed * 0.01
+
+        ai_profit = (row["unit_price"] - row["cost_price"]) * row["quantity"]
+
+        projected_revenue = int(round(row["line_amount"] * max(0.72, revenue_factor + variation)))
+        projected_profit = int(round(ai_profit * max(0.65, profit_factor + variation)))
+        projected_sales = max(1, int(round(row["quantity"] * max(0.72, sales_factor + (variation / 2)))))
+
+        return {
+            "revenue": projected_revenue,
+            "profit": projected_profit,
+            "sales": projected_sales,
+        }
+
+
+    @staticmethod
+    def _build_ai_summary(
+        current_order_rows: list[dict],
+        previous_order_rows: list[dict],
+        current_history_rows: list[dict],
+        previous_history_rows: list[dict],
+        period: str,
+    ) -> dict:
+        current_revenue = sum(row["line_amount"] for row in current_order_rows)
+        previous_revenue = sum(row["line_amount"] for row in previous_order_rows)
+
+        current_profit = sum(
+            (row["unit_price"] - row["cost_price"]) * row["quantity"]
+            for row in current_order_rows
+        )
+        previous_profit = sum(
+            (row["unit_price"] - row["cost_price"]) * row["quantity"]
+            for row in previous_order_rows
+        )
+
+        current_margin = round((current_profit / current_revenue) * 100, 1) if current_revenue > 0 else 0.0
+
+        current_lowest_share = round(
+            (
+                sum(1 for row in current_history_rows if row["applied_sale_price"] <= row["market_lowest_price"])
+                / len(current_history_rows)
+            ) * 100,
+            1,
+        ) if current_history_rows else 0.0
+
+        previous_lowest_share = round(
+            (
+                sum(1 for row in previous_history_rows if row["applied_sale_price"] <= row["market_lowest_price"])
+                / len(previous_history_rows)
+            ) * 100,
+            1,
+        ) if previous_history_rows else 0.0
+
+        current_change_count = len(current_history_rows)
+        previous_change_count = len(previous_history_rows)
+
+        return {
+            "compare_label": AdminPriceService._compare_label(period),
+            "ai_revenue": int(current_revenue),
+            "ai_revenue_change_rate": AdminPriceService._safe_change_rate(current_revenue, previous_revenue),
+            "ai_profit": int(current_profit),
+            "ai_profit_margin": float(current_margin),
+            "ai_profit_change_rate": AdminPriceService._safe_change_rate(current_profit, previous_profit),
+            "lowest_price_share": float(current_lowest_share),
+            "lowest_price_share_change_rate": AdminPriceService._safe_change_rate(current_lowest_share, previous_lowest_share),
+            "price_change_count": int(current_change_count),
+            "price_change_count_change_rate": AdminPriceService._safe_change_rate(current_change_count, previous_change_count),
+        }
+
+
+    @staticmethod
+    def _build_ai_simulation_items(
+        rows: list[dict],
+        period: str,
+        start_day: date,
+        end_day: date,
+    ) -> list[dict]:
+        labels = AdminPriceService._period_labels(period, start_day, end_day)
+        bucket_map = {
+            label: {
+                "label": label,
+                "ai_revenue": 0,
+                "ai_profit": 0,
+                "manual_revenue": 0,
+                "manual_profit": 0,
+            }
+            for label in labels
+        }
+
+        for row in rows:
+            label = AdminPriceService._bucket_label(row["ordered_at"], period, start_day, end_day)
+            if label not in bucket_map:
+                continue
+
+            ai_profit = (row["unit_price"] - row["cost_price"]) * row["quantity"]
+            manual = AdminPriceService._project_manual_metrics_from_row(row)
+
+            bucket_map[label]["ai_revenue"] += row["line_amount"]
+            bucket_map[label]["ai_profit"] += ai_profit
+            bucket_map[label]["manual_revenue"] += manual["revenue"]
+            bucket_map[label]["manual_profit"] += manual["profit"]
+
+        return [bucket_map[label] for label in labels]
+
+
+    @staticmethod
+    def _build_ai_category_comparison(
+        current_rows: list[dict],
+        previous_rows: list[dict],
+        category_options: list[str],
+        compare_period: str,
+    ) -> dict:
+        items = []
+
+        for category_name in category_options:
+            current_category_rows = [row for row in current_rows if row["category_name"] == category_name]
+            previous_category_rows = [row for row in previous_rows if row["category_name"] == category_name]
+
+            current_revenue = sum(row["line_amount"] for row in current_category_rows)
+            current_profit = sum(
+                (row["unit_price"] - row["cost_price"]) * row["quantity"]
+                for row in current_category_rows
+            )
+            current_sales = sum(row["quantity"] for row in current_category_rows)
+            current_margin = round((current_profit / current_revenue) * 100, 1) if current_revenue > 0 else 0.0
+
+            previous_revenue = sum(row["line_amount"] for row in previous_category_rows)
+            previous_profit = sum(
+                (row["unit_price"] - row["cost_price"]) * row["quantity"]
+                for row in previous_category_rows
+            )
+            previous_sales = sum(row["quantity"] for row in previous_category_rows)
+            previous_margin = round((previous_profit / previous_revenue) * 100, 1) if previous_revenue > 0 else 0.0
+
+            manual_revenue = 0
+            manual_profit = 0
+            manual_sales = 0
+
+            for row in current_category_rows:
+                projected = AdminPriceService._project_manual_metrics_from_row(row)
+                manual_revenue += projected["revenue"]
+                manual_profit += projected["profit"]
+                manual_sales += projected["sales"]
+
+            manual_margin = round((manual_profit / manual_revenue) * 100, 1) if manual_revenue > 0 else 0.0
+
+            items.append(
+                {
+                    "category": category_name,
+                    "performance": {
+                        "revenue": int(current_revenue),
+                        "profit": int(current_profit),
+                        "sales": int(current_sales),
+                        "margin": float(current_margin),
+                        "revenue_change": AdminPriceService._safe_change_rate(current_revenue, previous_revenue),
+                        "profit_change": AdminPriceService._safe_change_rate(current_profit, previous_profit),
+                        "sales_change": AdminPriceService._safe_change_rate(current_sales, previous_sales),
+                        "margin_change": round(current_margin - previous_margin, 1),
+                    },
+                    "ai": {
+                        "revenue": int(current_revenue),
+                        "profit": int(current_profit),
+                        "sales": int(current_sales),
+                        "margin": float(current_margin),
+                    },
+                    "manual": {
+                        "revenue": int(manual_revenue),
+                        "profit": int(manual_profit),
+                        "sales": int(manual_sales),
+                        "margin": float(manual_margin),
+                    },
+                }
+            )
+
+        return {
+            "compare_label": AdminPriceService._compare_label(compare_period),
+            "items": items,
+        }
+
+
+    @staticmethod
+    def _build_ai_history_section(history_rows: list[dict]) -> dict:
+        sorted_rows = sorted(history_rows, key=lambda x: x["logged_at"], reverse=True)
+
+        items = []
+        for index, row in enumerate(sorted_rows[:5], start=1):
+            items.append(
+                {
+                    "rank": index,
+                    "occurred_at": row["logged_at"],
+                    "product_code": row["product_code"],
+                    "product_name": row["product_name"],
+                    "reason": row["note"] or row["fallback_reason"] or "AI 가격 조정",
+                    "direction": row["direction"],
+                }
+            )
+
+        return {"items": items}
+
+
+    @staticmethod
+    def _build_ai_strategy_section(
+        current_order_rows: list[dict],
+        previous_order_rows: list[dict],
+        current_history_rows: list[dict],
+        period: str,
+    ) -> dict:
+        previous_grouped = defaultdict(lambda: {"revenue": 0})
+
+        for row in previous_order_rows:
+            previous_grouped[row["product_code"]]["revenue"] += row["line_amount"]
+
+        latest_history_map = {}
+        for row in sorted(current_history_rows, key=lambda x: x["logged_at"], reverse=True):
+            if row["product_code"] not in latest_history_map:
+                latest_history_map[row["product_code"]] = row
+
+        grouped = {}
+        for row in current_order_rows:
+            target = grouped.setdefault(
+                row["product_code"],
+                {
+                    "product_code": row["product_code"],
+                    "product_name": row["product_name"],
+                    "category": row["category_path"],
+                    "revenue": 0,
+                    "profit": 0,
+                    "sales_qty": 0,
+                    "avg_price_total": 0,
+                    "avg_price_count": 0,
+                    "stock": row["stock_qty"],
+                    "reason": "AI 가격 재검토",
+                },
+            )
+            target["revenue"] += row["line_amount"]
+            target["profit"] += (row["unit_price"] - row["cost_price"]) * row["quantity"]
+            target["sales_qty"] += row["quantity"]
+            target["avg_price_total"] += row["unit_price"]
+            target["avg_price_count"] += 1
+
+            latest_history = latest_history_map.get(row["product_code"])
+            if latest_history:
+                target["stock"] = latest_history["remaining_stock"]
+                target["reason"] = latest_history["note"] or latest_history["fallback_reason"] or "AI 가격 재검토"
+
+        items = []
+        for idx, item in enumerate(grouped.values(), start=1):
+            previous_revenue = previous_grouped[item["product_code"]]["revenue"]
+            compare_rate = AdminPriceService._safe_change_rate(item["revenue"], previous_revenue)
+            sale_price = round(item["avg_price_total"] / item["avg_price_count"]) if item["avg_price_count"] > 0 else 0
+            avg_profit = round(item["profit"] / item["sales_qty"]) if item["sales_qty"] > 0 else 0
+            margin = round((item["profit"] / item["revenue"]) * 100, 1) if item["revenue"] > 0 else 0.0
+
+            items.append(
+                {
+                    "rank": idx,
+                    "product_code": item["product_code"],
+                    "product_name": item["product_name"],
+                    "reason": item["reason"],
+                    "sales_qty": int(item["sales_qty"]),
+                    "stock": int(item["stock"]),
+                    "compare_rate": float(compare_rate),
+                    "sale_price": int(sale_price),
+                    "profit": int(avg_profit),
+                    "margin": float(margin),
+                    "category": item["category"],
+                }
+            )
+
+        items = sorted(items, key=lambda x: (x["compare_rate"], x["stock"]))[:5]
+
+        for idx, item in enumerate(items, start=1):
+            item["rank"] = idx
+
+        return {
+            "compare_label": AdminPriceService._compare_label(period),
+            "items": items,
+        }
+
+
+    @staticmethod
+    def get_ai_stat(
+        db: Session,
+        current_user: Member,
+        period: str,
+        start_date: date | None,
+        end_date: date | None,
+        simulation_keyword: str,
+        simulation_category: str,
+        simulation_period: str,
+        compare_period: str,
+        performance_category: str | None,
+    ) -> dict:
+        AdminPriceService._ensure_admin(current_user)
+
+        period = (period or "weekly").strip().lower()
+        simulation_period = (simulation_period or "weekly").strip().lower()
+        compare_period = (compare_period or "weekly").strip().lower()
+        simulation_category = (simulation_category or "전체").strip()
+
+        if period not in {"daily", "weekly", "monthly"}:
+            raise HTTPException(status_code=400, detail="잘못된 period 값입니다.")
+        if simulation_period not in {"daily", "weekly", "monthly"}:
+            raise HTTPException(status_code=400, detail="잘못된 simulation_period 값입니다.")
+        if compare_period not in {"daily", "weekly", "monthly"}:
+            raise HTTPException(status_code=400, detail="잘못된 compare_period 값입니다.")
+
+        current_start_day, current_end_day, current_start_dt, current_end_dt, total_days = (
+            AdminPriceService._resolve_stat_range(start_date, end_date, period)
+        )
+        previous_start_dt, previous_end_dt = AdminPriceService._get_previous_range(
+            current_start_dt,
+            total_days,
+        )
+
+        simulation_start_day, simulation_end_day, simulation_start_dt, simulation_end_dt, _ = (
+            AdminPriceService._resolve_stat_range(start_date, end_date, simulation_period)
+        )
+
+        compare_start_day, compare_end_day, compare_start_dt, compare_end_dt, compare_days = (
+            AdminPriceService._resolve_stat_range(start_date, end_date, compare_period)
+        )
+        compare_previous_start_dt, compare_previous_end_dt = AdminPriceService._get_previous_range(
+            compare_start_dt,
+            compare_days,
+        )
+
+        category_rows = (
+            db.query(Category)
+            .filter(Category.level == 2, Category.is_active.is_(True))
+            .order_by(Category.sort_order.asc(), Category.id.asc())
+            .all()
+        )
+        category_options = [AdminPriceService._leaf_category_name(category) for category in category_rows]
+        category_options = list(dict.fromkeys(category_options))
+
+        selected_performance_category = (
+            performance_category
+            if performance_category and performance_category in category_options
+            else (category_options[0] if category_options else "라면")
+        )
+
+        current_order_rows = AdminPriceService._query_ai_order_rows(db, current_start_dt, current_end_dt)
+        previous_order_rows = AdminPriceService._query_ai_order_rows(db, previous_start_dt, previous_end_dt)
+        current_history_rows = AdminPriceService._query_ai_history_rows(db, current_start_dt, current_end_dt)
+        previous_history_rows = AdminPriceService._query_ai_history_rows(db, previous_start_dt, previous_end_dt)
+
+        simulation_order_rows = AdminPriceService._query_ai_order_rows(db, simulation_start_dt, simulation_end_dt)
+
+        keyword = (simulation_keyword or "").strip().lower()
+        if simulation_category != "전체":
+            simulation_order_rows = [
+                row for row in simulation_order_rows if row["category_name"] == simulation_category
+            ]
+        if keyword:
+            simulation_order_rows = [
+                row for row in simulation_order_rows
+                if keyword in row["product_code"].lower() or keyword in row["product_name"].lower()
+            ]
+
+        compare_current_rows = AdminPriceService._query_ai_order_rows(db, compare_start_dt, compare_end_dt)
+        compare_previous_rows = AdminPriceService._query_ai_order_rows(db, compare_previous_start_dt, compare_previous_end_dt)
+
+        performance_rows = [
+            row for row in current_order_rows if row["category_name"] == selected_performance_category
+        ]
+
+        return {
+            "period": period,
+            "category_options": category_options,
+            "summary": AdminPriceService._build_ai_summary(
+                current_order_rows=current_order_rows,
+                previous_order_rows=previous_order_rows,
+                current_history_rows=current_history_rows,
+                previous_history_rows=previous_history_rows,
+                period=period,
+            ),
+            "simulation": {
+                "items": AdminPriceService._build_ai_simulation_items(
+                    rows=simulation_order_rows,
+                    period=simulation_period,
+                    start_day=simulation_start_day,
+                    end_day=simulation_end_day,
+                )
+            },
+            "category_comparison": AdminPriceService._build_ai_category_comparison(
+                current_rows=compare_current_rows,
+                previous_rows=compare_previous_rows,
+                category_options=category_options,
+                compare_period=compare_period,
+            ),
+            "performance": {
+                "items": AdminPriceService._build_ai_simulation_items(
+                    rows=performance_rows,
+                    period=period,
+                    start_day=current_start_day,
+                    end_day=current_end_day,
+                )
+            },
+            "history": AdminPriceService._build_ai_history_section(current_history_rows),
+            "strategy": AdminPriceService._build_ai_strategy_section(
+                current_order_rows=current_order_rows,
+                previous_order_rows=previous_order_rows,
+                current_history_rows=current_history_rows,
+                period=period,
             ),
         }

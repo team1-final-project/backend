@@ -1,8 +1,0 @@
-{
-  "is_running": true,
-  "pid": 17436,
-  "started_at": "2026-04-20T12:11:23.595337",
-  "stopped_at": null,
-  "last_cycle_at": "2026-04-20T12:42:08.375783",
-  "last_message": "사이클 완료 - processed=2, updated=2, total_sold_qty=38"
-}

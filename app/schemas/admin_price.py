@@ -33,7 +33,6 @@ class AdminAiPriceHistoryItemResponse(BaseModel):
     is_lowest_price: bool
     market_lowest_price: int | None = None
 
-    # 화면용 계산값: 1개당 기준 차이
     market_gap_amount: int | None = None
     market_gap_rate: float | None = None
 
@@ -46,6 +45,9 @@ class AdminAiPriceHistoryItemResponse(BaseModel):
     market_pack_count: int | None = None
     market_unit_sale_price: int | None = None
 
+    reason: str | None = None
+    change_source: str | None = None
+
 
 class AdminAiPriceHistoryDetailResponse(BaseModel):
     keyword: str
@@ -56,6 +58,7 @@ class AdminAiPriceHistoryDetailResponse(BaseModel):
     catalog: AdminAiPriceHistoryCatalogResponse
     histories: list[AdminAiPriceHistoryItemResponse] = Field(default_factory=list)
     history_count: int
+
 
 class AdminSalesSummaryResponse(BaseModel):
     compare_label: str
@@ -157,3 +160,101 @@ class AdminSalesStatResponse(BaseModel):
     bad_inventory: list[AdminBadInventoryItemResponse] = Field(default_factory=list)
     product_mix: list[AdminSalesProductMixItemResponse] = Field(default_factory=list)
     ranking: AdminSalesRankingResponse
+
+
+class AdminAiStatSummaryResponse(BaseModel):
+    compare_label: str
+    ai_revenue: int
+    ai_revenue_change_rate: float
+    ai_profit: int
+    ai_profit_margin: float
+    ai_profit_change_rate: float
+    lowest_price_share: float
+    lowest_price_share_change_rate: float
+    price_change_count: int
+    price_change_count_change_rate: float
+
+
+class AdminAiStatSimulationItemResponse(BaseModel):
+    label: str
+    ai_revenue: int
+    ai_profit: int
+    manual_revenue: int
+    manual_profit: int
+
+
+class AdminAiStatSimulationResponse(BaseModel):
+    items: list[AdminAiStatSimulationItemResponse] = Field(default_factory=list)
+
+
+class AdminAiStatPerformanceMetricResponse(BaseModel):
+    revenue: int
+    profit: int
+    sales: int
+    margin: float
+    revenue_change: float
+    profit_change: float
+    sales_change: float
+    margin_change: float
+
+
+class AdminAiStatSimpleMetricResponse(BaseModel):
+    revenue: int
+    profit: int
+    sales: int
+    margin: float
+
+
+class AdminAiStatCategoryComparisonItemResponse(BaseModel):
+    category: str
+    performance: AdminAiStatPerformanceMetricResponse
+    ai: AdminAiStatSimpleMetricResponse
+    manual: AdminAiStatSimpleMetricResponse
+
+
+class AdminAiStatCategoryComparisonResponse(BaseModel):
+    compare_label: str
+    items: list[AdminAiStatCategoryComparisonItemResponse] = Field(default_factory=list)
+
+
+class AdminAiStatHistoryItemResponse(BaseModel):
+    rank: int
+    occurred_at: datetime
+    product_code: str
+    product_name: str
+    reason: str
+    direction: str
+
+
+class AdminAiStatHistoryResponse(BaseModel):
+    items: list[AdminAiStatHistoryItemResponse] = Field(default_factory=list)
+
+
+class AdminAiStatStrategyItemResponse(BaseModel):
+    rank: int
+    product_code: str
+    product_name: str
+    reason: str
+    sales_qty: int
+    stock: int
+    compare_rate: float
+    sale_price: int
+    profit: int
+    margin: float
+    category: str
+
+
+class AdminAiStatStrategyResponse(BaseModel):
+    compare_label: str
+    items: list[AdminAiStatStrategyItemResponse] = Field(default_factory=list)
+
+
+class AdminAiStatResponse(BaseModel):
+    period: str
+    category_options: list[str] = Field(default_factory=list)
+    summary: AdminAiStatSummaryResponse
+    simulation: AdminAiStatSimulationResponse
+    category_comparison: AdminAiStatCategoryComparisonResponse
+    performance: AdminAiStatSimulationResponse
+    history: AdminAiStatHistoryResponse
+    strategy: AdminAiStatStrategyResponse

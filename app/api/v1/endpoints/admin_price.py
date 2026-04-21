@@ -8,6 +8,7 @@ from app.core.security import get_current_active_user
 from app.models.member import Member
 from app.schemas.admin_price import (
     AdminAiPriceHistoryDetailResponse,
+    AdminAiStatResponse,
     AdminSalesStatResponse,
 )
 from app.services.admin_price_service import AdminPriceService
@@ -30,6 +31,7 @@ def read_admin_ai_price_history_detail(
         start_date=start_date,
         end_date=end_date,
     )
+
 
 @router.get("/sales-stat", response_model=AdminSalesStatResponse)
 def read_admin_sales_stat(
@@ -61,4 +63,31 @@ def read_admin_sales_stat(
         ranking_type=ranking_type,
         ranking_category=ranking_category or "전체",
         ranking_period=ranking_period,
+    )
+
+
+@router.get("/ai-stat", response_model=AdminAiStatResponse)
+def read_admin_ai_stat(
+    period: str = Query(default="weekly"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    simulation_keyword: str | None = Query(default=None),
+    simulation_category: str | None = Query(default="전체"),
+    simulation_period: str = Query(default="weekly"),
+    compare_period: str = Query(default="weekly"),
+    performance_category: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminPriceService.get_ai_stat(
+        db=db,
+        current_user=current_user,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        simulation_keyword=simulation_keyword or "",
+        simulation_category=simulation_category or "전체",
+        simulation_period=simulation_period,
+        compare_period=compare_period,
+        performance_category=performance_category,
     )
