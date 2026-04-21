@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.ai.inference import predict_optimal_price
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.enums import PriceChangeSource
+from app.core.enums import PriceChangeSource, ProductSaleStatus
 from app.core.timezone import now_kst
 from app.models.product import Product
 from app.models.catalog_product import CatalogProduct
@@ -144,7 +144,7 @@ def _build_history_row(
         updated_at=now,
     )
 
-def _process_one_product(db: Session, product: Product) -> None:
+def _process_one_product(db: Session, product: Product) -> bool:
     """
     상품 1건 처리
     - product 기준 값 읽기
@@ -196,6 +196,16 @@ def _process_one_product(db: Session, product: Product) -> None:
 
     # 3) product 가격 반영
     new_price = int(round(float(result["change_price"])))
+    old_price_int = int(round(old_price))
+
+    if new_price == old_price_int:
+        logger.info(
+            "AI 가격 유지. product_id=%s, sale_price=%s",
+            product.id,
+            old_price_int,
+        )
+        return False
+
     product.sale_price = new_price
     product.unit_sale_price = calculate_unit_sale_price(
         new_price,
@@ -217,6 +227,8 @@ def _process_one_product(db: Session, product: Product) -> None:
         market_unit_sale_price=market_unit_sale_price,
     )
     db.add(history)
+
+    return True
     
 def _run_ai_pricing_once_sync() -> None:
     """
@@ -226,21 +238,36 @@ def _run_ai_pricing_once_sync() -> None:
     """
     db = SessionLocal()
     try:
-        stmt = select(Product).where(Product.ai_pricing_enabled == 1)
+        stmt = (
+            select(Product)
+            .where(
+                Product.ai_pricing_enabled.is_(True),
+                Product.sale_status == ProductSaleStatus.ON_SALE,
+                Product.deleted_at.is_(None),
+            )
+        )
         products = db.execute(stmt).scalars().all()
 
         logger.info("AI 자동 가격조정 시작. 대상 상품 수=%s", len(products))
 
         for product in products:
             try:
-                _process_one_product(db, product)
+                changed = _process_one_product(db, product)
                 db.commit()
                 db.refresh(product)
-                logger.info(
-                    "AI 가격 반영 완료. product_id=%s, sale_price=%s",
-                    product.id,
-                    product.sale_price,
-                )
+
+                if changed:
+                    logger.info(
+                        "AI 가격 반영 완료. product_id=%s, sale_price=%s",
+                        product.id,
+                        product.sale_price,
+                    )
+                else:
+                    logger.info(
+                        "AI 가격 미변경. history 저장 없음. product_id=%s, sale_price=%s",
+                        product.id,
+                        product.sale_price,
+                    )
             except Exception:
                 db.rollback()
                 logger.exception("AI 가격 반영 실패. product_id=%s", product.id)
