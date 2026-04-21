@@ -72,6 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 seed_master_data()

@@ -1,11 +1,19 @@
 import re
+import subprocess
+import time
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import subprocess
+
+
+_DEBUG_PORT = 9222
+_USER_DATA_DIR = r"C:\chrometemp"
+_CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+_chrome_process = None
+_shared_driver = None
 
 
 # 카탈로그 최저가 찾아서 반환
@@ -54,12 +62,10 @@ def _parse_catalog_name_from_text(text: str) -> str | None:
     else:
         candidate = normalized
 
-    # stop word가 나오면 거기서 끊기
     cut_positions = [candidate.find(word) for word in stop_words if word in candidate]
     if cut_positions:
         candidate = candidate[:min(cut_positions)].strip()
 
-    # 앞쪽 UI 문구 제거: 마지막 노이즈 단어 뒤만 남김
     last_noise_end = -1
     for word in leading_noise_words:
         idx = candidate.rfind(word)
@@ -69,41 +75,92 @@ def _parse_catalog_name_from_text(text: str) -> str | None:
     if last_noise_end != -1:
         candidate = candidate[last_noise_end:].strip()
 
-    # 리뷰 꼬리 제거
     candidate = re.sub(r"\s*\d+건.*$", "", candidate).strip()
 
-    # 숫자만 남은 경우 버림
     if re.fullmatch(r"[\d.]+", candidate):
         return None
 
-    # 한글/영문이 있어야 상품명으로 인정
     if not re.search(r"[A-Za-z가-힣]", candidate):
         return None
 
     return candidate or None
 
 
-# 크롤링 드라이버 초기화
-def _create_driver() -> webdriver.Chrome:
-    subprocess.Popen(r'C:\Program Files\Google\Chrome\Application\chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\chrometemp"')
+def _launch_debug_chrome_once() -> None:
+    global _chrome_process
+
+    if _chrome_process is not None and _chrome_process.poll() is None:
+        return
+
+    cmd = [
+        _CHROME_PATH,
+        f"--remote-debugging-port={_DEBUG_PORT}",
+        f"--user-data-dir={_USER_DATA_DIR}",
+    ]
+    _chrome_process = subprocess.Popen(cmd)
+    time.sleep(1.5)
+
+
+def _create_or_get_driver() -> webdriver.Chrome:
+    global _shared_driver
+
+    if _shared_driver is not None:
+        try:
+            _ = _shared_driver.current_url
+            return _shared_driver
+        except Exception:
+            _shared_driver = None
+
+    _launch_debug_chrome_once()
 
     option = webdriver.ChromeOptions()
-
-    option.add_argument("--window-size=19220,1080")
+    option.add_argument("--window-size=1920,1080")
     option.add_argument("--start-maximized")
-    option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+    option.add_experimental_option("debuggerAddress", f"127.0.0.1:{_DEBUG_PORT}")
 
-    return webdriver.Chrome(options=option)
+    _shared_driver = webdriver.Chrome(options=option)
+    _shared_driver.set_window_size(1920, 1080)
+    return _shared_driver
+
+
+def _keep_only_one_window(driver: webdriver.Chrome) -> None:
+    handles = driver.window_handles
+    if not handles:
+        return
+
+    main_handle = handles[0]
+    driver.switch_to.window(main_handle)
+
+    for handle in handles[1:]:
+        try:
+            driver.switch_to.window(handle)
+            driver.close()
+        except Exception:
+            pass
+
+    driver.switch_to.window(main_handle)
+
+
+def _cleanup_after_crawl(driver: webdriver.Chrome, keep_current_page: bool = False) -> None:
+    try:
+        _keep_only_one_window(driver)
+        driver.switch_to.window(driver.window_handles[0])
+
+        if not keep_current_page:
+            driver.get("about:blank")
+    except Exception:
+        pass
 
 
 # 크롤링 (카테고리명, 최저가)
 def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
     url = f"https://search.shopping.naver.com/catalog/{catalog_code}"
-    driver = _create_driver()
-
-    driver.set_window_size(1920, 1080)
+    driver = _create_or_get_driver()
+    is_blocked = False
 
     try:
+        _keep_only_one_window(driver)
+        driver.switch_to.window(driver.window_handles[0])
         driver.get(url)
 
         wait = WebDriverWait(driver, 10)
@@ -112,7 +169,6 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
         body_text = driver.find_element(By.TAG_NAME, "body").text
         page_source = driver.page_source
 
-        # 보안 페이지 감지
         blocked_keywords = [
             "보안 확인을 완료해 주세요",
             "captcha",
@@ -120,8 +176,10 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
             "실제 사용자임을 확인",
         ]
         joined_text = f"{driver.title}\n{body_text}\n{page_source[:2000]}".lower()
+
         if any(keyword.lower() in joined_text for keyword in blocked_keywords):
-            print(f"⚠️ 네이버 보안 페이지 감지(catalog_code={catalog_code})")
+            is_blocked = True
+            print(f"⚠️ 네이버 보안 페이지 감지(catalog_code={catalog_code}) - 창을 유지합니다.")
             return {
                 "catalog_code": catalog_code,
                 "catalog_name": None,
@@ -136,7 +194,6 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
         if catalog_name is None:
             catalog_name = _parse_catalog_name_from_text(page_source)
 
-        # fallback: XPath로 최저가 탐색
         if lowest_price is None:
             xpath_candidates = [
                 "//*[contains(text(), '최저')]/following::*[contains(text(), '원')][1]",
@@ -169,8 +226,7 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
         }
 
     finally:
-        driver.quit()
-
+        _cleanup_after_crawl(driver, keep_current_page=is_blocked)
 
 # 크롤링 (최저가)
 def fetch_lowest_price_by_catalog(catalog_code: str) -> float | None:
