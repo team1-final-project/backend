@@ -25,6 +25,7 @@ class ProductPriceHistory(BaseModel):
 
     min_price_limit = Column(Integer, nullable=True)
     max_price_limit = Column(Integer, nullable=True)
+    price_per_time = Column(Integer, nullable=True)
 
     remaining_stock = Column(Integer, nullable=False, default=0)
 

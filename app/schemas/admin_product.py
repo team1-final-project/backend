@@ -20,6 +20,7 @@ class AdminProductBaseRequest(BaseModel):
     ai_pricing_enabled: bool = False
     min_price_limit: int | None = Field(default=None, ge=0)
     max_price_limit: int | None = Field(default=None, ge=0)
+    price_per_time: int | None = Field(default=None, ge=0)
 
     stock_qty: int = Field(ge=0)
     safety_stock_qty: int = Field(ge=0)
@@ -73,6 +74,7 @@ class AdminProductDetailResponse(BaseModel):
     ai_pricing_enabled: bool
     min_price_limit: int | None = None
     max_price_limit: int | None = None
+    price_per_time: int | None = None
 
     stock_qty: int
     safety_stock_qty: int
