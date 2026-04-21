@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backfill_parser.add_argument(
         "--period",
-        choices=["week", "month"],
+        choices=["today", "week", "month"],
         required=True,
         help="적재 기간 선택",
     )
@@ -65,8 +65,9 @@ def run_menu() -> None:
         print("2. 사이클 1회 실행 (once)")
         print("3. 중지 요청 (stop)")
         print("4. 상태 확인 (status)")
-        print("5. 전주 기록 적재 (backfill week)")
-        print("6. 전월 기록 적재 (backfill month)")
+        print("5. 오늘 시작부터 현재까지 적재 (backfill today)")
+        print("6. 전주 기록 적재 (backfill week)")
+        print("7. 전월 기록 적재 (backfill month)")
         print("0. 종료")
 
         choice = input("선택 > ").strip()
@@ -109,6 +110,26 @@ def run_menu() -> None:
             continue
 
         if choice == "5":
+            cycles_raw = input("오늘 누적 횟수(기본 3) > ").strip()
+            cycles_per_day = int(cycles_raw) if cycles_raw else 3
+
+            result = run_backfill_sync(
+                period="today",
+                cycles_per_day=cycles_per_day,
+            )
+            print(
+                json.dumps(
+                    {
+                        "message": "오늘 시작부터 현재까지 시뮬레이션 적재 완료",
+                        **result,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            continue
+
+        if choice == "6":
             cycles_raw = input("하루당 횟수(기본 3) > ").strip()
             cycles_per_day = int(cycles_raw) if cycles_raw else 3
 
@@ -128,7 +149,7 @@ def run_menu() -> None:
             )
             continue
 
-        if choice == "6":
+        if choice == "7":
             cycles_raw = input("하루당 횟수(기본 3) > ").strip()
             cycles_per_day = int(cycles_raw) if cycles_raw else 3
 

@@ -728,35 +728,76 @@ def _generate_backfill_timestamps(
 
     if period == "week":
         total_days = 7
-    elif period == "month":
+        timestamps: list[datetime] = []
+
+        for day_offset in range(total_days, 0, -1):
+            base_day = (now - timedelta(days=day_offset)).date()
+
+            for _ in range(cycles_per_day):
+                hour = random.randint(9, 21)
+                minute = random.randint(0, 59)
+                second = random.randint(0, 59)
+
+                timestamps.append(
+                    datetime(
+                        year=base_day.year,
+                        month=base_day.month,
+                        day=base_day.day,
+                        hour=hour,
+                        minute=minute,
+                        second=second,
+                        tzinfo=now.tzinfo,
+                    )
+                )
+
+        timestamps.sort()
+        return timestamps
+
+    if period == "month":
         total_days = 30
-    else:
-        raise ValueError("period는 'week' 또는 'month'만 가능합니다.")
+        timestamps: list[datetime] = []
 
-    timestamps: list[datetime] = []
+        for day_offset in range(total_days, 0, -1):
+            base_day = (now - timedelta(days=day_offset)).date()
 
-    for day_offset in range(total_days, 0, -1):
-        base_day = (now - timedelta(days=day_offset)).date()
+            for _ in range(cycles_per_day):
+                hour = random.randint(9, 21)
+                minute = random.randint(0, 59)
+                second = random.randint(0, 59)
+
+                timestamps.append(
+                    datetime(
+                        year=base_day.year,
+                        month=base_day.month,
+                        day=base_day.day,
+                        hour=hour,
+                        minute=minute,
+                        second=second,
+                        tzinfo=now.tzinfo,
+                    )
+                )
+
+        timestamps.sort()
+        return timestamps
+
+    if period == "today":
+        start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 아직 오늘이 거의 시작 직후면 최소 1개는 찍히게
+        if now <= start_of_today:
+            return [start_of_today]
+
+        timestamps: list[datetime] = []
 
         for _ in range(cycles_per_day):
-            hour = random.randint(9, 21)
-            minute = random.randint(0, 59)
-            second = random.randint(0, 59)
+            random_seconds = random.randint(0, int((now - start_of_today).total_seconds()))
+            simulated_at = start_of_today + timedelta(seconds=random_seconds)
+            timestamps.append(simulated_at)
 
-            timestamps.append(
-                datetime(
-                    year=base_day.year,
-                    month=base_day.month,
-                    day=base_day.day,
-                    hour=hour,
-                    minute=minute,
-                    second=second,
-                    tzinfo=now.tzinfo,
-                )
-            )
+        timestamps.sort()
+        return timestamps
 
-    timestamps.sort()
-    return timestamps
+    raise ValueError("period는 'today', 'week' 또는 'month'만 가능합니다.")
 
 
 def run_backfill_sync(
