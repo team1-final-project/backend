@@ -537,21 +537,22 @@ class AdminProductService:
         previous_start = previous_end - timedelta(days=6)
 
         def summarize_records(records) -> dict:
+            total_count = len(records)
+            matched_count = sum(
+                1
+                for product, catalog in records
+                if catalog is not None and catalog.external_catalog_id
+            )
+            unmatched_count = total_count - matched_count
+            ai_price_count = sum(
+                1 for product, catalog in records if bool(product.ai_pricing_enabled)
+            )
+
             return {
-                "total_count": len(products),
-                "sale_count": sum(
-                    1
-                    for product in products
-                    if product.sale_status and product.sale_status.value == "ON_SALE"
-                ),
-                "sold_out_count": sum(
-                    1
-                    for product in products
-                    if product.sale_status and product.sale_status.value == "SOLD_OUT"
-                ),
-                "ai_enabled_count": sum(
-                    1 for product in products if bool(product.ai_pricing_enabled)
-                ),
+                "total_count": total_count,
+                "matched_count": matched_count,
+                "unmatched_count": unmatched_count,
+                "ai_price_count": ai_price_count,
             }
 
         current_records = (
@@ -1355,3 +1356,152 @@ class AdminProductService:
             "sale_status": product.sale_status.value if product.sale_status else None,
             "message": "판매상태가 변경되었습니다.",
         }
+    
+        @staticmethod
+        def get_product_list(
+            db: Session,
+            current_user: Member,
+            keyword: str | None = None,
+            category_id: int | None = None,
+            start_date: date | None = None,
+            end_date: date | None = None,
+            page: int = 1,
+            size: int = 10,
+        ) -> dict:
+            AdminProductService._ensure_admin(current_user)
+
+            page = max(page, 1)
+            size = max(1, min(size, 100))
+
+            base_query = (
+                db.query(Product, Category)
+                .join(Category, Category.id == Product.category_id)
+                .filter(Product.deleted_at.is_(None))
+            )
+
+            if category_id is not None:
+                base_query = base_query.filter(Product.category_id == category_id)
+
+            if keyword:
+                keyword = keyword.strip()
+                if keyword:
+                    like_keyword = f"%{keyword}%"
+                    base_query = base_query.filter(
+                        or_(
+                            Product.product_name.ilike(like_keyword),
+                            Product.product_code.ilike(like_keyword),
+                        )
+                    )
+
+            if start_date is not None:
+                start_datetime = datetime.combine(start_date, time.min)
+                base_query = base_query.filter(Product.updated_at >= start_datetime)
+
+            if end_date is not None:
+                end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
+                base_query = base_query.filter(Product.updated_at < end_datetime)
+
+            # 요약카드는 검색/필터와 무관하게 전체 DB 기준
+            summary_products = (
+                db.query(Product)
+                .filter(Product.deleted_at.is_(None))
+                .all()
+            )
+            summary_snapshot = AdminProductService.summarize_products(summary_products)
+
+            # 최근 7일 / 이전 7일 변화량
+            today = now_kst().date()
+            current_start = today - timedelta(days=6)
+            current_end = today
+
+            previous_end = current_start - timedelta(days=1)
+            previous_start = previous_end - timedelta(days=6)
+
+            current_window_products = (
+                db.query(Product)
+                .filter(
+                    Product.deleted_at.is_(None),
+                    func.date(Product.updated_at) >= current_start,
+                    func.date(Product.updated_at) <= current_end,
+                )
+                .all()
+            )
+
+            previous_window_products = (
+                db.query(Product)
+                .filter(
+                    Product.deleted_at.is_(None),
+                    func.date(Product.updated_at) >= previous_start,
+                    func.date(Product.updated_at) <= previous_end,
+                )
+                .all()
+            )
+
+            current_window_summary = AdminProductService.summarize_products(
+                current_window_products
+            )
+            previous_window_summary = AdminProductService.summarize_products(
+                previous_window_products
+            )
+
+            summary = {
+                "total_count": summary_snapshot["total_count"],
+                "sale_count": summary_snapshot["sale_count"],
+                "sold_out_count": summary_snapshot["sold_out_count"],
+                "ai_enabled_count": summary_snapshot["ai_enabled_count"],
+                "total_diff": (
+                    current_window_summary["total_count"]
+                    - previous_window_summary["total_count"]
+                ),
+                "sale_diff": (
+                    current_window_summary["sale_count"]
+                    - previous_window_summary["sale_count"]
+                ),
+                "sold_out_diff": (
+                    current_window_summary["sold_out_count"]
+                    - previous_window_summary["sold_out_count"]
+                ),
+                "ai_enabled_diff": (
+                    current_window_summary["ai_enabled_count"]
+                    - previous_window_summary["ai_enabled_count"]
+                ),
+            }
+
+            total = base_query.count()
+            total_pages = ceil(total / size) if total > 0 else 1
+
+            rows = (
+                base_query.order_by(Product.updated_at.desc(), Product.id.desc())
+                .offset((page - 1) * size)
+                .limit(size)
+                .all()
+            )
+
+            items = []
+            for product, category in rows:
+                items.append(
+                    {
+                        "id": product.id,
+                        "product_code": product.product_code,
+                        "product_name": product.product_name,
+                        "category_id": product.category_id,
+                        "category_name": getattr(category, "full_path", None)
+                        or category.name,
+                        "sale_price": product.sale_price,
+                        "ai_pricing_enabled": bool(product.ai_pricing_enabled),
+                        "stock_qty": product.stock_qty,
+                        "sale_status": (
+                            product.sale_status.value if product.sale_status else None
+                        ),
+                        "updated_at": product.updated_at,
+                    }
+                )
+
+            return {
+                "items": items,
+                "summary": summary,
+                "page": page,
+                "size": size,
+                "total": total,
+                "total_pages": total_pages,
+            }
