@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 from math import ceil
 from sqlalchemy import or_, and_, func
 
-from app.core.enums import ImageType, InventoryChangeType, MemberRole
+from app.core.enums import ImageType, InventoryChangeType, MemberRole, ProductSaleStatus
 from app.models.brand import Brand
 from app.models.catalog_product import CatalogProduct
 from app.models.category import Category
@@ -1241,4 +1241,51 @@ class AdminProductService:
             "product_code": product.product_code,
             "ai_pricing_enabled": product.ai_pricing_enabled,
             "message": "AI 가격변경 사용 여부가 변경되었습니다.",
+        }
+    
+    @staticmethod
+    def update_sale_status(
+        db: Session,
+        current_user: Member,
+        product_id: int,
+        sale_status: str,
+    ) -> dict:
+        AdminProductService._ensure_admin(current_user)
+
+        normalized_status = (sale_status or "").strip().upper()
+
+        try:
+            next_sale_status = ProductSaleStatus(normalized_status)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="유효하지 않은 판매상태입니다.",
+            )
+
+        product = (
+            db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        product.sale_status = next_sale_status
+
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+
+        return {
+            "id": product.id,
+            "product_code": product.product_code,
+            "sale_status": product.sale_status.value if product.sale_status else None,
+            "message": "판매상태가 변경되었습니다.",
         }

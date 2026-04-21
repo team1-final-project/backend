@@ -12,6 +12,7 @@ from app.schemas.admin_product import (
     AdminProductDetailResponse,
     AdminProductUpdateRequest,
     AdminProductUpdateResponse,
+    AdminProductSaleStatusUpdateRequest,
     AdminProductAiPricingUpdateRequest,
     AdminProductAiPricingUpdateResponse,
     AdminMatchingSummaryResponse,
@@ -249,4 +250,18 @@ def update_admin_product_ai_pricing(
         current_user=current_user,
         product_id=product_id,
         ai_pricing_enabled=payload.ai_pricing_enabled,
+    )
+
+@router.patch("/{product_id}/sale-status")
+def update_admin_product_sale_status(
+    product_id: int,
+    payload: AdminProductSaleStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return AdminProductService.update_sale_status(
+        db=db,
+        current_user=current_user,
+        product_id=product_id,
+        sale_status=payload.sale_status,
     )
