@@ -32,6 +32,7 @@ class Product(BaseModel):
     ai_pricing_enabled = Column(Boolean, nullable=False, default=False)
     min_price_limit = Column(Integer, nullable=True)
     max_price_limit = Column(Integer, nullable=True)
+    price_per_time = Column(Integer, nullable=True)
 
     stock_qty = Column(Integer, nullable=False, default=0)
     safety_stock_qty = Column(Integer, nullable=False, default=0)

@@ -29,10 +29,10 @@ _scheduler_lock = asyncio.Lock()
 
 def _get_price_change_limit(product: Product) -> float:
     """
-    상품별 최대 변경폭 컬럼이 있으면 그 값을 쓰고,
+    상품별 회당 조정가(price_per_time)가 있으면 그 값을 쓰고,
     없으면 전역 기본값을 사용.
     """
-    value = getattr(product, "price_change_limit", None)
+    value = getattr(product, "price_per_time", None)
     if value is None:
         return float(settings.AI_PRICE_CHANGE_LIMIT_DEFAULT)
     return float(value)
