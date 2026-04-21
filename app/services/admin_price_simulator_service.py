@@ -436,7 +436,7 @@ def _process_one_product_simulation(db: Session, product: Product) -> dict[str, 
         buyer = _select_simulation_member(db)
 
         qty_before = int(product.stock_qty or 0)
-        qty_after = max(0, qty_before + chunk_qty)
+        qty_after = max(0, qty_before - chunk_qty)
 
         _, order_item = _create_order_bundle(
             db,
