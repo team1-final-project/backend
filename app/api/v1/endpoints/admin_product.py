@@ -224,14 +224,15 @@ def get_catalog_name(
 ):
     AdminProductService._ensure_admin(current_user)
 
-    catalog_name = AdminProductService.resolve_catalog_name(
+    catalog_info = AdminProductService.resolve_catalog_name(
         db,
         external_catalog_id,
     )
 
     return {
         "external_catalog_id": external_catalog_id,
-        "catalog_name": catalog_name,
+        "catalog_name": catalog_info.get("catalog_name"),
+        "current_lowest_price": catalog_info.get("current_lowest_price"),
     }
 
 

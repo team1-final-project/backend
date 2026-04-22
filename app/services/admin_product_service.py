@@ -79,20 +79,24 @@ class AdminProductService:
     def resolve_catalog_name(
         db: Session,
         external_catalog_id: str | None,
-    ) -> str | None:
+    ) -> dict:
         if not external_catalog_id:
-            return None
+            return {
+                "catalog_name": None,
+                "current_lowest_price": None,
+            }
 
         external_catalog_id = external_catalog_id.strip()
         if not external_catalog_id:
-            return None
+            return {
+                "catalog_name": None,
+                "current_lowest_price": None,
+            }
 
-        catalog = get_catalog_product_by_external_catalog_id(
+        existing_catalog = get_catalog_product_by_external_catalog_id(
             db,
             external_catalog_id,
         )
-        if catalog:
-            return catalog.catalog_name
 
         crawl_result = fetch_catalog_info_by_catalog(external_catalog_id)
         if not crawl_result:
@@ -101,7 +105,9 @@ class AdminProductService:
                 detail="카탈로그가 존재하지 않거나 크롤링에 실패했습니다.",
             )
 
-        catalog_name = crawl_result.get("catalog_name")
+        catalog_name = crawl_result.get("catalog_name") or (
+            existing_catalog.catalog_name if existing_catalog else None
+        )
         lowest_price = crawl_result.get("lowest_price")
 
         if not catalog_name and lowest_price is None:
@@ -110,19 +116,19 @@ class AdminProductService:
                 detail="카탈로그가 존재하지 않거나 크롤링 결과가 올바르지 않습니다.",
             )
 
-        if not catalog_name:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="카탈로그 이름을 찾을 수 없습니다.",
-            )
-
-        return catalog_name
+        return {
+            "catalog_name": catalog_name,
+            "current_lowest_price": (
+                int(lowest_price) if lowest_price is not None else None
+            ),
+        }
 
     @staticmethod
     def _get_or_create_catalog_product(
         db: Session,
         external_catalog_id: str | None,
         catalog_name: str | None,
+        current_lowest_price: int | None = None,
         category_text: str | None = None,
     ) -> CatalogProduct | None:
         if not external_catalog_id:
@@ -141,6 +147,17 @@ class AdminProductService:
                 catalog.catalog_name = catalog_name
             if category_text:
                 catalog.category_text = category_text
+            if current_lowest_price is not None:
+                catalog.current_lowest_price = int(current_lowest_price)
+
+                base_name = catalog_name or catalog.catalog_name
+                if base_name:
+                    pack_count = parse_pack_count(base_name)
+                    catalog.pack_count = pack_count
+                    catalog.unit_sale_price = calculate_unit_sale_price(
+                        int(current_lowest_price),
+                        pack_count,
+                    )
             return catalog
 
         if not catalog_name:
@@ -149,11 +166,24 @@ class AdminProductService:
                 detail="카탈로그 이름이 없어 카탈로그를 생성할 수 없습니다.",
             )
 
+        pack_count = parse_pack_count(catalog_name)
+
         catalog = CatalogProduct(
             external_catalog_id=external_catalog_id,
             catalog_name=catalog_name,
             source="NAVER",
             category_text=category_text,
+            current_lowest_price=(
+                int(current_lowest_price)
+                if current_lowest_price is not None
+                else None
+            ),
+            pack_count=pack_count,
+            unit_sale_price=(
+                calculate_unit_sale_price(int(current_lowest_price), pack_count)
+                if current_lowest_price is not None
+                else None
+            ),
         )
         db.add(catalog)
         db.flush()
@@ -267,6 +297,7 @@ class AdminProductService:
             db=db,
             external_catalog_id=payload.catalog_external_id,
             catalog_name=payload.catalog_name,
+            current_lowest_price=payload.current_lowest_price,
             category_text=category.full_path,
         )
 
@@ -399,6 +430,7 @@ class AdminProductService:
 
         catalog_external_id = None
         catalog_name = product.catalog_name_snapshot
+        current_lowest_price = None
 
         if product.catalog_product_id:
             catalog = (
@@ -407,6 +439,11 @@ class AdminProductService:
                 .first()
             )
             if catalog:
+                current_lowest_price = (
+                    int(catalog.current_lowest_price)
+                    if catalog.current_lowest_price is not None
+                    else None
+                )                
                 catalog_external_id = catalog.external_catalog_id
                 catalog_name = catalog.catalog_name
 
@@ -417,6 +454,7 @@ class AdminProductService:
             "sale_status": product.sale_status,
             "catalog_external_id": catalog_external_id,
             "catalog_name": catalog_name,
+            "current_lowest_price": current_lowest_price,
             "sale_price": product.sale_price,
             "cost_price": product.cost_price,
             "ai_pricing_enabled": product.ai_pricing_enabled,
@@ -767,6 +805,7 @@ class AdminProductService:
             db=db,
             external_catalog_id=payload.catalog_external_id,
             catalog_name=payload.catalog_name,
+            current_lowest_price=payload.current_lowest_price,
             category_text=category.full_path,
         )
 

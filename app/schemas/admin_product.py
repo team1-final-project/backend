@@ -13,6 +13,7 @@ class AdminProductBaseRequest(BaseModel):
 
     catalog_external_id: str | None = None
     catalog_name: str | None = None
+    current_lowest_price: int | None = Field(default=None, ge=0)
 
     sale_price: int = Field(ge=0)
     cost_price: int = Field(ge=0)
@@ -69,6 +70,7 @@ class AdminProductDetailResponse(BaseModel):
 
     catalog_external_id: str | None = None
     catalog_name: str | None = None
+    current_lowest_price: int | None = None
 
     sale_price: int
     cost_price: int
@@ -101,6 +103,7 @@ class ProductImageUploadResponse(BaseModel):
 class CatalogNameResolveResponse(BaseModel):
     external_catalog_id: str
     catalog_name: str | None = None
+    current_lowest_price: int | None = None
 
 
 class AdminProductListItemResponse(BaseModel):
