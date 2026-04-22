@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     cart,
     admin_product,
     admin_price,
+    admin_dashboard,
 )
 from app.api.v1.endpoints import order, order_read
 
@@ -26,3 +27,4 @@ api_router.include_router(admin_product.router)
 api_router.include_router(admin_price.router)
 api_router.include_router(order.router, prefix="/orders", tags=["orders"])
 api_router.include_router(order_read.router, prefix="/orders", tags=["orders"])
+api_router.include_router(admin_dashboard.router)

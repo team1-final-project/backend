@@ -9,7 +9,6 @@ from app.models.member import Member
 from app.schemas.admin_price import (
     AdminAiPriceHistoryDetailResponse,
     AdminAiStatResponse,
-    AdminDashboardResponse,
     AdminSalesStatResponse,
 )
 from app.services.admin_price_service import AdminPriceService
@@ -94,18 +93,3 @@ def read_admin_ai_stat(
     )
 
 
-@router.get("/dashboard", response_model=AdminDashboardResponse)
-def read_admin_dashboard(
-    category: str | None = Query(default=None),
-    share_category: str | None = Query(default=None),
-    contribution_keyword: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    current_user: Member = Depends(get_current_active_user),
-):
-    return AdminPriceService.get_dashboard(
-        db=db,
-        current_user=current_user,
-        category=category,
-        share_category=share_category,
-        contribution_keyword=contribution_keyword or "",
-    )
