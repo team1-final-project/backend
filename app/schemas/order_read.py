@@ -6,8 +6,10 @@ class MyOrderSummaryResponse(BaseModel):
     id: int
     order_number: str
     status: str
-    total_amount: int
-    created_at: datetime | None = None
+    total_product_amount: int
+    total_shipping_fee: int
+    total_payment_amount: int
+    ordered_at: datetime | None = None
 
 
 class MyOrderListResponse(BaseModel):

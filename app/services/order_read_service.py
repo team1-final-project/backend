@@ -26,19 +26,16 @@ def get_my_orders(db: Session, member_id: int):
         items.append(
             {
                 "id": order.id,
-                "order_number": getattr(order, "order_no", f"ORDER-{order.id}"),
+                "order_number": order.order_no,
                 "status": _to_status_text(
                     getattr(order, "order_status", None)
                     or getattr(order, "payment_status", None)
                     or getattr(order, "status", None)
                 ),
-                "total_amount": int(
-                    getattr(order, "total_payment_amount", None)
-                    or getattr(order, "total_product_amount", None)
-                    or 0
-                ),
-                "created_at": getattr(order, "ordered_at", None)
-                or getattr(order, "created_at", None),
+                "total_product_amount": int(order.total_product_amount or 0),
+                "total_shipping_fee": int(order.total_shipping_fee or 0),
+                "total_payment_amount": int(order.total_payment_amount or 0),
+                "ordered_at": order.ordered_at,
             }
         )
 
