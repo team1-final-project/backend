@@ -7,12 +7,27 @@ from app.models.member import Member
 from app.schemas.cart import (
     CartCheckAllRequest,
     CartItemCheckedUpdateRequest,
+    CartItemCreateRequest,
     CartItemQuantityUpdateRequest,
     CartResponse,
 )
 from app.services.cart_service import CartService
 
 router = APIRouter(prefix="/cart", tags=["cart"])
+
+
+@router.post("/items", response_model=CartResponse)
+def create_cart_item(
+    payload: CartItemCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: Member = Depends(get_current_active_user),
+):
+    return CartService.add_item(
+        db=db,
+        current_user=current_user,
+        product_id=payload.product_id,
+        quantity=payload.quantity,
+    )
 
 
 @router.get("/me", response_model=CartResponse)

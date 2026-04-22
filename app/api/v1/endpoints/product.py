@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.product import ProductListResponse
+from app.schemas.product import ProductDetailResponse, ProductListResponse
 from app.services.product_service import ProductService
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -24,4 +24,26 @@ def read_products(
         sort=sort,
         page=page,
         size=size,
+    )
+
+
+@router.get("/by-code/{product_code}", response_model=ProductDetailResponse)
+def read_product_by_code(
+    product_code: str,
+    db: Session = Depends(get_db),
+):
+    return ProductService.get_product_detail_by_code(
+        db=db,
+        product_code=product_code,
+    )
+
+
+@router.get("/{product_id}", response_model=ProductDetailResponse)
+def read_product_detail(
+    product_id: int,
+    db: Session = Depends(get_db),
+):
+    return ProductService.get_product_detail(
+        db=db,
+        product_id=product_id,
     )

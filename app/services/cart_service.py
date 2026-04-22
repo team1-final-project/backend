@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.enums import CartStatus, ImageType
+from app.core.enums import CartStatus, ImageType, ProductSaleStatus
 from app.models.cart import Cart
 from app.models.cart_item import CartItem
 from app.models.member import Member
@@ -31,7 +31,11 @@ class CartService:
         return cart
 
     @staticmethod
-    def _get_owned_cart_item(db: Session, current_user: Member, cart_item_id: int) -> CartItem:
+    def _get_owned_cart_item(
+        db: Session,
+        current_user: Member,
+        cart_item_id: int,
+    ) -> CartItem:
         active_cart = CartService._get_or_create_active_cart(db, current_user.id)
 
         cart_item = (
@@ -50,6 +54,31 @@ class CartService:
             )
 
         return cart_item
+
+    @staticmethod
+    def _get_public_product_or_raise(db: Session, product_id: int) -> Product:
+        product = (
+            db.query(Product)
+            .filter(
+                Product.id == product_id,
+                Product.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        if product.sale_status != ProductSaleStatus.ON_SALE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="판매중인 상품만 장바구니에 담을 수 있습니다.",
+            )
+
+        return product
 
     @staticmethod
     def _build_cart_response(db: Session, cart: Cart) -> CartResponse:
@@ -83,7 +112,7 @@ class CartService:
                     id=cart_item.id,
                     productId=product.id,
                     name=product.product_name,
-                    price=product.sale_price,
+                    price=int(cart_item.unit_price_snapshot or product.sale_price or 0),
                     quantity=cart_item.quantity,
                     image=thumbnail.image_url if thumbnail else None,
                     checked=cart_item.is_selected,
@@ -94,6 +123,60 @@ class CartService:
             cartId=cart.id,
             items=items,
         )
+
+    @staticmethod
+    def add_item(
+        db: Session,
+        current_user: Member,
+        product_id: int,
+        quantity: int,
+    ) -> CartResponse:
+        if quantity < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="수량은 1개 이상이어야 합니다.",
+            )
+
+        product = CartService._get_public_product_or_raise(db, product_id)
+        active_cart = CartService._get_or_create_active_cart(db, current_user.id)
+
+        existing_item = (
+            db.query(CartItem)
+            .filter(
+                CartItem.cart_id == active_cart.id,
+                CartItem.product_id == product_id,
+            )
+            .first()
+        )
+
+        target_quantity = quantity
+        if existing_item is not None:
+            target_quantity = int(existing_item.quantity or 0) + quantity
+
+        if target_quantity > int(product.stock_qty or 0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="재고보다 많은 수량을 장바구니에 담을 수 없습니다.",
+            )
+
+        if existing_item is not None:
+            existing_item.quantity = target_quantity
+            existing_item.unit_price_snapshot = int(product.sale_price or 0)
+            existing_item.is_selected = True
+            db.add(existing_item)
+        else:
+            db.add(
+                CartItem(
+                    cart_id=active_cart.id,
+                    product_id=product_id,
+                    quantity=quantity,
+                    unit_price_snapshot=int(product.sale_price or 0),
+                    is_selected=True,
+                )
+            )
+
+        db.commit()
+        return CartService._build_cart_response(db, active_cart)
 
     @staticmethod
     def get_my_cart(db: Session, current_user: Member) -> CartResponse:
@@ -114,6 +197,14 @@ class CartService:
             )
 
         cart_item = CartService._get_owned_cart_item(db, current_user, cart_item_id)
+        product = CartService._get_public_product_or_raise(db, cart_item.product_id)
+
+        if quantity > int(product.stock_qty or 0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="재고보다 많은 수량으로 변경할 수 없습니다.",
+            )
+
         cart_item.quantity = quantity
         db.add(cart_item)
         db.commit()

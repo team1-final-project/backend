@@ -16,6 +16,11 @@ class CartResponse(BaseModel):
     items: list[CartItemResponse]
 
 
+class CartItemCreateRequest(BaseModel):
+    product_id: int
+    quantity: int
+
+
 class CartItemQuantityUpdateRequest(BaseModel):
     quantity: int
 

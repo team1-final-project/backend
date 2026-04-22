@@ -34,3 +34,33 @@ class ProductListResponse(BaseModel):
     size: int
     total: int
     total_pages: int
+
+
+class ProductTrendPointResponse(BaseModel):
+    label: str
+    value: int
+
+
+class ProductDetailResponse(BaseModel):
+    id: int
+    product_code: str
+    name: str
+    category_name: str
+    brand: str | None = None
+
+    price: int
+    original_price: int | None = None
+    cost_price: int
+    recent_lowest_price: int | None = None
+
+    origin_country: str | None = None
+    expiration_date: str | None = None
+    stock_qty: int
+    shipping_fee: int
+
+    thumbnail_image_url: str | None = None
+    detail_image_urls: list[str] = Field(default_factory=list)
+    description_html: str | None = None
+
+    ai_pricing_enabled: bool = False
+    trend_points: list[ProductTrendPointResponse] = Field(default_factory=list)

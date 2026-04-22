@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from math import ceil
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_
@@ -155,7 +155,6 @@ class ProductService:
             if previous_sale_price > applied_sale_price:
                 is_price_dropped = True
 
-        # 우선순위: 최저가 > 가격 하락중 > 인기 상품
         if is_lowest_price:
             return "최저가", "accent", True, is_price_dropped, is_popular
 
@@ -195,8 +194,203 @@ class ProductService:
                 ),
             )
 
-        # latest
         return sorted(items, key=lambda x: -x["id"])
+
+    @staticmethod
+    def _resolve_market_lowest_price(
+        db: Session,
+        product: Product,
+        latest_history: ProductPriceHistory | None,
+    ) -> int | None:
+        if latest_history and latest_history.market_lowest_price is not None:
+            return int(latest_history.market_lowest_price)
+
+        if getattr(product, "catalog_product_id", None):
+            from app.models.catalog_product import CatalogProduct
+
+            catalog = (
+                db.query(CatalogProduct)
+                .filter(CatalogProduct.id == product.catalog_product_id)
+                .first()
+            )
+            if catalog and catalog.current_lowest_price is not None:
+                return int(catalog.current_lowest_price)
+
+        return None
+
+    @staticmethod
+    def _get_product_images(db: Session, product_id: int) -> list[ProductImage]:
+        return (
+            db.query(ProductImage)
+            .filter(
+                ProductImage.product_id == product_id,
+                ProductImage.is_active.is_(True),
+            )
+            .order_by(ProductImage.sort_order.asc(), ProductImage.id.asc())
+            .all()
+        )
+
+    @staticmethod
+    def _build_trend_points(db: Session, product_id: int, current_price: int) -> list[dict]:
+        history_rows = (
+            db.query(ProductPriceHistory)
+            .filter(ProductPriceHistory.product_id == product_id)
+            .order_by(
+                ProductPriceHistory.logged_at.desc(),
+                ProductPriceHistory.id.desc(),
+            )
+            .limit(5)
+            .all()
+        )
+
+        if not history_rows:
+            return [{"label": "현재", "value": int(current_price or 0)}]
+
+        history_rows = list(reversed(history_rows))
+        labels_base = ["4주전", "3주전", "2주전", "1주전", "현재"]
+        labels = labels_base[-len(history_rows):]
+
+        points: list[dict] = []
+        for label, row in zip(labels, history_rows):
+            points.append(
+                {
+                    "label": label,
+                    "value": int(row.applied_sale_price or current_price or 0),
+                }
+            )
+
+        return points
+
+    @staticmethod
+    def _get_public_product(
+        db: Session,
+        *,
+        product_id: int | None = None,
+        product_code: str | None = None,
+    ) -> tuple[Product, Category | None]:
+        query = (
+            db.query(Product, Category)
+            .outerjoin(Category, Product.category_id == Category.id)
+            .filter(
+                Product.deleted_at.is_(None),
+                Product.sale_status == ProductSaleStatus.ON_SALE,
+            )
+        )
+
+        if product_id is not None:
+            query = query.filter(Product.id == product_id)
+
+        if product_code is not None:
+            query = query.filter(Product.product_code == product_code)
+
+        row = query.first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="상품을 찾을 수 없습니다.",
+            )
+
+        return row
+
+    @staticmethod
+    def _build_product_detail_response(
+        db: Session,
+        *,
+        product: Product,
+        category: Category | None,
+    ) -> dict:
+        latest_history = (
+            db.query(ProductPriceHistory)
+            .filter(ProductPriceHistory.product_id == product.id)
+            .order_by(
+                ProductPriceHistory.logged_at.desc(),
+                ProductPriceHistory.id.desc(),
+            )
+            .first()
+        )
+
+        market_lowest_price = ProductService._resolve_market_lowest_price(
+            db=db,
+            product=product,
+            latest_history=latest_history,
+        )
+
+        sale_price = int(product.sale_price or 0)
+        original_price = None
+        if market_lowest_price is not None and sale_price < market_lowest_price:
+            original_price = int(market_lowest_price)
+
+        images = ProductService._get_product_images(db, product.id)
+        thumbnail_image_url = None
+        detail_image_urls: list[str] = []
+
+        for image in images:
+            if image.image_type == ImageType.THUMBNAIL:
+                if thumbnail_image_url is None:
+                    thumbnail_image_url = image.image_url
+            else:
+                detail_image_urls.append(image.image_url)
+
+        return {
+            "id": product.id,
+            "product_code": product.product_code,
+            "name": product.product_name,
+            "category_name": ProductService._leaf_category_name(category),
+            "brand": product.brand_name_snapshot,
+            "price": sale_price,
+            "original_price": original_price,
+            "cost_price": int(product.cost_price or 0),
+            "recent_lowest_price": market_lowest_price,
+            "origin_country": product.origin_country,
+            "expiration_date": (
+                product.expiration_date.isoformat()
+                if product.expiration_date is not None
+                else None
+            ),
+            "stock_qty": int(product.stock_qty or 0),
+            "shipping_fee": int(product.shipping_fee or 0),
+            "thumbnail_image_url": thumbnail_image_url,
+            "detail_image_urls": detail_image_urls,
+            "description_html": product.description_html,
+            "ai_pricing_enabled": bool(product.ai_pricing_enabled),
+            "trend_points": ProductService._build_trend_points(
+                db=db,
+                product_id=product.id,
+                current_price=sale_price,
+            ),
+        }
+
+    @staticmethod
+    def get_product_detail(
+        db: Session,
+        *,
+        product_id: int,
+    ) -> dict:
+        product, category = ProductService._get_public_product(
+            db=db,
+            product_id=product_id,
+        )
+        return ProductService._build_product_detail_response(
+            db=db,
+            product=product,
+            category=category,
+        )
+
+    @staticmethod
+    def get_product_detail_by_code(
+        db: Session,
+        *,
+        product_code: str,
+    ) -> dict:
+        product, category = ProductService._get_public_product(
+            db=db,
+            product_code=product_code,
+        )
+        return ProductService._build_product_detail_response(
+            db=db,
+            product=product,
+            category=category,
+        )
 
     @staticmethod
     def get_product_list(
@@ -253,23 +447,11 @@ class ProductService:
         for product, category in rows:
             latest_history = latest_history_map.get(product.id)
 
-            market_lowest_price = None
-            if latest_history and latest_history.market_lowest_price is not None:
-                market_lowest_price = int(latest_history.market_lowest_price)
-
-            if (
-                market_lowest_price is None
-                and getattr(product, "catalog_product_id", None)
-            ):
-                from app.models.catalog_product import CatalogProduct
-
-                catalog = (
-                    db.query(CatalogProduct)
-                    .filter(CatalogProduct.id == product.catalog_product_id)
-                    .first()
-                )
-                if catalog and catalog.current_lowest_price is not None:
-                    market_lowest_price = int(catalog.current_lowest_price)
+            market_lowest_price = ProductService._resolve_market_lowest_price(
+                db=db,
+                product=product,
+                latest_history=latest_history,
+            )
 
             sale_price = int(product.sale_price or 0)
             is_popular = product.id in popular_product_ids
@@ -283,7 +465,6 @@ class ProductService:
                 )
             )
 
-            # 상품은 항상 노출하고, original_price만 조건부로 표시
             original_price = None
             if market_lowest_price is not None and sale_price < int(market_lowest_price):
                 original_price = int(market_lowest_price)
