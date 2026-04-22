@@ -15,6 +15,8 @@ _CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 _chrome_process = None
 _shared_driver = None
 
+class NaverCaptchaDetectedError(RuntimeError):
+    pass
 
 # 카탈로그 최저가 찾아서 반환
 def _parse_lowest_price_from_text(text: str) -> float | None:
@@ -179,12 +181,13 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
 
         if any(keyword.lower() in joined_text for keyword in blocked_keywords):
             is_blocked = True
-            print(f"⚠️ 네이버 보안 페이지 감지(catalog_code={catalog_code}) - 창을 유지합니다.")
-            return {
-                "catalog_code": catalog_code,
-                "catalog_name": None,
-                "lowest_price": None,
-            }
+            print(
+                f"⚠️ 네이버 보안 페이지 감지(catalog_code={catalog_code}) - "
+                "창을 유지하고 AI 가격 조정을 중단합니다."
+            )
+            raise NaverCaptchaDetectedError(
+                f"네이버 캡챠 감지(catalog_code={catalog_code})"
+            )
 
         lowest_price = _parse_lowest_price_from_text(body_text)
         if lowest_price is None:
@@ -217,6 +220,8 @@ def fetch_catalog_info_by_catalog(catalog_code: str) -> dict:
             "lowest_price": lowest_price,
         }
 
+    except NaverCaptchaDetectedError:
+        raise
     except Exception as e:
         print(f"⚠️ 카탈로그 정보 조회 실패(catalog_code={catalog_code}): {e}")
         return {

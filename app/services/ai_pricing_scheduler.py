@@ -17,7 +17,10 @@ from app.core.timezone import now_kst
 from app.models.product import Product
 from app.models.catalog_product import CatalogProduct
 from app.models.product_price_history import ProductPriceHistory
-from app.services.naver_crawler_service import fetch_catalog_info_by_catalog
+from app.services.naver_crawler_service import (
+    fetch_catalog_info_by_catalog,
+    NaverCaptchaDetectedError,
+)
 from app.services.utils.catalog_pricing_utils import (
     parse_pack_count,
     calculate_unit_sale_price,
@@ -25,6 +28,7 @@ from app.services.utils.catalog_pricing_utils import (
 
 logger = logging.getLogger(__name__)
 _scheduler_lock = asyncio.Lock()
+CAPTCHA_RETRY_SECONDS = 15
 
 
 def _get_price_change_limit(product: Product) -> float:
@@ -185,8 +189,23 @@ def _process_one_product(db: Session, product: Product) -> bool:
 
     keyword = getattr(product, "product_name", None)
     current_price = float(product.sale_price)
-    min_price_limit = float(getattr(product, "min_price_limit"))
-    max_price_limit = float(getattr(product, "max_price_limit"))
+
+    min_price_limit_raw = getattr(product, "min_price_limit", None)
+    max_price_limit_raw = getattr(product, "max_price_limit", None)
+    price_per_time_raw = getattr(product, "price_per_time", None)
+
+    if min_price_limit_raw is None or max_price_limit_raw is None:
+        raise ValueError(
+            f"product_id={product.id}: 최소가/최대가 제한이 없어 AI 가격조정을 진행할 수 없습니다."
+        )
+
+    if price_per_time_raw is None:
+        raise ValueError(
+            f"product_id={product.id}: 회당 조정가(price_per_time)가 없어 AI 가격조정을 진행할 수 없습니다."
+        )
+
+    min_price_limit = float(min_price_limit_raw)
+    max_price_limit = float(max_price_limit_raw)
     current_stock = float(getattr(product, "stock_qty"))
     safety_stock = float(getattr(product, "safety_stock_qty"))
 
@@ -262,8 +281,8 @@ def _process_one_product(db: Session, product: Product) -> bool:
 def _run_ai_pricing_once_sync() -> None:
     """
     동기 DB 작업 본체
-    상품별 개별 commit/rollback 처리로
-    한 상품 실패해도 나머지는 계속 진행
+    - 일반 실패: 해당 상품만 rollback 후 다음 상품 진행
+    - 캡챠 감지: 현재 회차 즉시 중단하고 상위로 예외 전파
     """
     db = SessionLocal()
     try:
@@ -297,6 +316,15 @@ def _run_ai_pricing_once_sync() -> None:
                         product.id,
                         product.sale_price,
                     )
+
+            except NaverCaptchaDetectedError:
+                db.rollback()
+                logger.warning(
+                    "캡챠 감지로 현재 AI 가격조정 회차를 즉시 중단합니다. product_id=%s",
+                    product.id,
+                )
+                raise
+
             except Exception:
                 db.rollback()
                 logger.exception("AI 가격 반영 실패. product_id=%s", product.id)
@@ -304,7 +332,6 @@ def _run_ai_pricing_once_sync() -> None:
         logger.info("AI 자동 가격조정 종료")
     finally:
         db.close()
-
 
 async def run_ai_pricing_once() -> None:
     """
@@ -321,6 +348,7 @@ async def run_ai_pricing_once() -> None:
 async def run_ai_pricing_scheduler_forever() -> None:
     """
     서버 켜져 있는 동안 n분마다 반복 실행
+    - 캡챠 감지 시: 즉시 중단 후 30초 뒤 재시도
     """
     interval_minutes = int(settings.AI_PRICING_INTERVAL_MINUTES)
     interval_seconds = max(interval_minutes * 60, 1)
@@ -328,6 +356,12 @@ async def run_ai_pricing_scheduler_forever() -> None:
     if getattr(settings, "AI_PRICING_RUN_ON_STARTUP", False):
         try:
             await run_ai_pricing_once()
+        except NaverCaptchaDetectedError:
+            logger.warning(
+                "서버 시작 직후 캡챠 감지. %s초 후 재시도합니다.",
+                CAPTCHA_RETRY_SECONDS,
+            )
+            await asyncio.sleep(CAPTCHA_RETRY_SECONDS)
         except Exception:
             logger.exception("서버 시작 직후 AI 가격조정 실행 실패")
 
@@ -336,15 +370,24 @@ async def run_ai_pricing_scheduler_forever() -> None:
 
         try:
             await run_ai_pricing_once()
+
         except asyncio.CancelledError:
             raise
+
+        except NaverCaptchaDetectedError:
+            logger.warning(
+                "AI 가격 조정 중 캡챠 감지. 현재 회차를 중단하고 %s초 후 재시도합니다.",
+                CAPTCHA_RETRY_SECONDS,
+            )
+            await asyncio.sleep(CAPTCHA_RETRY_SECONDS)
+            continue
+
         except Exception:
             logger.exception("주기 AI 가격조정 실행 중 예외 발생")
 
         elapsed = time.monotonic() - started_at
         sleep_seconds = max(interval_seconds - elapsed, 1)
         await asyncio.sleep(sleep_seconds)
-
 
 async def stop_task_safely(task: asyncio.Task | None) -> None:
     if task is None:
