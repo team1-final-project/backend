@@ -41,6 +41,32 @@ class ProductTrendPointResponse(BaseModel):
     value: int
 
 
+class AILowestPriceItemResponse(BaseModel):
+    id: int
+    product_code: str
+    category_id: int
+    name: str
+    brand: str | None = None
+    thumbnail_image_url: str | None = None
+
+    current_price: int
+    lowest_price: int
+    drop_amount: int
+    drop_rate: int
+
+    ai_recommendation: str
+    ai_description: str
+    badge_tone: str = "default"
+
+    trend_points: list[ProductTrendPointResponse] = Field(default_factory=list)
+
+
+class AILowestPriceListResponse(BaseModel):
+    categories: list[ProductListCategoryResponse] = Field(default_factory=list)
+    items: list[AILowestPriceItemResponse] = Field(default_factory=list)
+    total: int
+
+
 class ProductDetailResponse(BaseModel):
     id: int
     product_code: str

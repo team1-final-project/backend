@@ -197,6 +197,238 @@ class ProductService:
         return sorted(items, key=lambda x: -x["id"])
 
     @staticmethod
+    def _build_ai_lowest_trend_points(
+        db: Session,
+        product_id: int,
+        current_price: int,
+    ) -> list[dict]:
+        now = now_kst()
+        weekly_windows = [
+            ("4주전", 28, 21),
+            ("3주전", 21, 14),
+            ("2주전", 14, 7),
+            ("1주전", 7, 0),
+        ]
+
+        last_known_price = int(current_price or 0)
+        points: list[dict] = []
+
+        for label, start_days_ago, end_days_ago in weekly_windows:
+            window_start = now - timedelta(days=start_days_ago)
+            window_end = now - timedelta(days=end_days_ago)
+
+            row = (
+                db.query(ProductPriceHistory)
+                .filter(
+                    ProductPriceHistory.product_id == product_id,
+                    ProductPriceHistory.logged_at >= window_start,
+                    ProductPriceHistory.logged_at < window_end,
+                )
+                .order_by(
+                    ProductPriceHistory.logged_at.desc(),
+                    ProductPriceHistory.id.desc(),
+                )
+                .first()
+            )
+
+            if row and row.applied_sale_price is not None:
+                last_known_price = int(row.applied_sale_price)
+
+            points.append(
+                {
+                    "label": label,
+                    "value": int(last_known_price),
+                }
+            )
+
+        return points
+
+    @staticmethod
+    def _build_ai_lowest_recommendation(
+        *,
+        current_price: int,
+        lowest_price: int,
+        market_lowest_price: int | None,
+        trend_points: list[dict],
+    ) -> tuple[str, str, str]:
+        trend_values = [int(point["value"]) for point in trend_points] or [current_price]
+        average_price = sum(trend_values + [current_price]) / max(len(trend_values) + 1, 1)
+
+        if market_lowest_price is not None and current_price <= market_lowest_price:
+            return (
+                "지금 구매 추천",
+                "현재 판매가가 시장 최저가 수준이라 바로 구매해도 괜찮아요.",
+                "primary",
+            )
+
+        if current_price <= lowest_price:
+            return (
+                "최저가 근접",
+                "최근 4주 기준 가장 낮은 가격 구간에 가까워요.",
+                "accent",
+            )
+
+        if current_price < average_price:
+            return (
+                "가격 하락중",
+                "최근 4주 평균보다 낮은 흐름이라 조금 더 지켜볼 만해요.",
+                "accent",
+            )
+
+        return (
+            "추가 관찰",
+            "최근 가격 흐름이 안정적이라 조금 더 추이를 보는 것도 좋아요.",
+            "default",
+        )
+
+    @staticmethod
+    def _sort_ai_lowest_items(items: list[dict], sort: str) -> list[dict]:
+        if sort == "lowest":
+            return sorted(items, key=lambda x: (x["lowest_price"], x["current_price"], -x["id"]))
+
+        if sort == "priceLow":
+            return sorted(items, key=lambda x: (x["current_price"], -x["id"]))
+
+        if sort == "recommend":
+            def recommendation_priority(item: dict) -> int:
+                label = item.get("ai_recommendation")
+                if label == "지금 구매 추천":
+                    return 3
+                if label == "최저가 근접":
+                    return 2
+                if label == "가격 하락중":
+                    return 1
+                return 0
+
+            return sorted(
+                items,
+                key=lambda x: (
+                    -recommendation_priority(x),
+                    -x["drop_amount"],
+                    -x["id"],
+                ),
+            )
+
+        # default: 하락폭순
+        return sorted(items, key=lambda x: (-x["drop_amount"], x["lowest_price"], -x["id"]))
+
+    @staticmethod
+    def get_ai_lowest_products(
+        db: Session,
+        *,
+        keyword: str | None = None,
+        category_id: int | None = None,
+        sort: str = "drop",
+    ) -> dict:
+        if sort not in {"drop", "lowest", "priceLow", "recommend"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="지원하지 않는 정렬 방식입니다.",
+            )
+
+        query = (
+            db.query(Product, Category)
+            .join(Category, Product.category_id == Category.id)
+            .filter(
+                Product.deleted_at.is_(None),
+                Product.sale_status == ProductSaleStatus.ON_SALE,
+            )
+        )
+
+        if category_id is not None:
+            query = query.filter(Product.category_id == category_id)
+
+        if keyword:
+            normalized_keyword = keyword.strip()
+            if normalized_keyword:
+                like_keyword = f"%{normalized_keyword}%"
+                query = query.filter(
+                    or_(
+                        Product.product_name.ilike(like_keyword),
+                        Product.product_code.ilike(like_keyword),
+                        Product.brand_name_snapshot.ilike(like_keyword),
+                    )
+                )
+
+        rows = query.all()
+        products = [product for product, _ in rows]
+        product_ids = [product.id for product in products]
+
+        thumbnail_map = ProductService._get_thumbnail_map(db, product_ids)
+        latest_history_map = ProductService._get_latest_history_map(db, product_ids)
+
+        items: list[dict] = []
+        for product, category in rows:
+            latest_history = latest_history_map.get(product.id)
+            market_lowest_price = ProductService._resolve_market_lowest_price(
+                db=db,
+                product=product,
+                latest_history=latest_history,
+            )
+
+            current_price = int(product.sale_price or 0)
+            trend_points = ProductService._build_ai_lowest_trend_points(
+                db=db,
+                product_id=product.id,
+                current_price=current_price,
+            )
+            trend_values = [int(point["value"]) for point in trend_points] or [current_price]
+
+            recent_lowest_price = min(trend_values + [current_price])
+            recent_highest_price = max(trend_values + [current_price])
+
+            lowest_price = (
+                int(market_lowest_price)
+                if market_lowest_price is not None
+                else int(recent_lowest_price)
+            )
+
+            drop_amount = max(0, int(recent_highest_price) - int(current_price))
+            drop_rate = (
+                round((drop_amount / int(recent_highest_price)) * 100)
+                if int(recent_highest_price) > 0
+                else 0
+            )
+
+            ai_recommendation, ai_description, badge_tone = (
+                ProductService._build_ai_lowest_recommendation(
+                    current_price=current_price,
+                    lowest_price=lowest_price,
+                    market_lowest_price=market_lowest_price,
+                    trend_points=trend_points,
+                )
+            )
+
+            items.append(
+                {
+                    "id": product.id,
+                    "product_code": product.product_code,
+                    "category_id": product.category_id,
+                    "name": product.product_name,
+                    "brand": product.brand_name_snapshot,
+                    "thumbnail_image_url": thumbnail_map.get(product.id),
+                    "current_price": current_price,
+                    "lowest_price": int(lowest_price),
+                    "drop_amount": int(drop_amount),
+                    "drop_rate": int(drop_rate),
+                    "ai_recommendation": ai_recommendation,
+                    "ai_description": ai_description,
+                    "badge_tone": badge_tone,
+                    "trend_points": trend_points,
+                }
+            )
+
+        sorted_items = ProductService._sort_ai_lowest_items(items, sort)
+
+        return {
+            "categories": ProductService._get_category_options(db),
+            "items": sorted_items,
+            "total": len(sorted_items),
+        }
+
+
+
+    @staticmethod
     def _resolve_market_lowest_price(
         db: Session,
         product: Product,

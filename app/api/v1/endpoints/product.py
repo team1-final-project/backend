@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.product import ProductDetailResponse, ProductListResponse
+from app.schemas.product import (
+    AILowestPriceListResponse,
+    ProductDetailResponse,
+    ProductListResponse,
+)
 from app.services.product_service import ProductService
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -24,6 +28,21 @@ def read_products(
         sort=sort,
         page=page,
         size=size,
+    )
+
+
+@router.get("/ai-lowest", response_model=AILowestPriceListResponse)
+def read_ai_lowest_products(
+    keyword: str | None = Query(default=None),
+    category_id: int | None = Query(default=None),
+    sort: str = Query(default="drop"),
+    db: Session = Depends(get_db),
+):
+    return ProductService.get_ai_lowest_products(
+        db=db,
+        keyword=keyword,
+        category_id=category_id,
+        sort=sort,
     )
 
 
