@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     admin_product,
     admin_price,
 )
+from app.api.v1.endpoints import order, order_read
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -23,3 +24,5 @@ api_router.include_router(order.router)
 api_router.include_router(cart.router)
 api_router.include_router(admin_product.router)
 api_router.include_router(admin_price.router)
+api_router.include_router(order.router, prefix="/orders", tags=["orders"])
+api_router.include_router(order_read.router, prefix="/orders", tags=["orders"])
