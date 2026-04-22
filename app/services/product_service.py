@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.core.enums import ImageType, OrderStatus, PaymentStatus
+from app.core.enums import ImageType, OrderStatus, PaymentStatus, ProductSaleStatus
 from app.core.timezone import now_kst
 from app.models.category import Category
 from app.models.order import Order
@@ -222,7 +222,7 @@ class ProductService:
             .join(Category, Product.category_id == Category.id)
             .filter(
                 Product.deleted_at.is_(None),
-                Product.sale_status == "ON_SALE",
+                Product.sale_status == ProductSaleStatus.ON_SALE,
             )
         )
 
@@ -256,13 +256,11 @@ class ProductService:
             market_lowest_price = None
             if latest_history and latest_history.market_lowest_price is not None:
                 market_lowest_price = int(latest_history.market_lowest_price)
-            elif product.catalog_product_id:
-                # catalog_product.current_lowest_price는 admin에서도 fallback으로 활용 중
-                # 필요 시 추후 join 최적화 가능
-                pass
 
-            if market_lowest_price is None and getattr(product, "catalog_product_id", None):
-                # 필요 최소 쿼리
+            if (
+                market_lowest_price is None
+                and getattr(product, "catalog_product_id", None)
+            ):
                 from app.models.catalog_product import CatalogProduct
 
                 catalog = (
@@ -285,9 +283,10 @@ class ProductService:
                 )
             )
 
+            # 상품은 항상 노출하고, original_price만 조건부로 표시
             original_price = None
-            if market_lowest_price is not None and sale_price < market_lowest_price:
-                original_price = market_lowest_price
+            if market_lowest_price is not None and sale_price < int(market_lowest_price):
+                original_price = int(market_lowest_price)
 
             items.append(
                 {
