@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     category,
     order,
     cart,
+    product,
     admin_product,
     admin_price,
     admin_dashboard,
@@ -23,6 +24,7 @@ api_router.include_router(naver_auth.router)
 api_router.include_router(category.router)
 api_router.include_router(order.router)
 api_router.include_router(cart.router)
+api_router.include_router(product.router)
 api_router.include_router(admin_product.router)
 api_router.include_router(admin_price.router)
 api_router.include_router(order.router, prefix="/orders", tags=["orders"])
