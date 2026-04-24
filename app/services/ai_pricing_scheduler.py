@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import logging
 import time
 from typing import Optional
@@ -29,6 +30,7 @@ from app.services.utils.catalog_pricing_utils import (
 logger = logging.getLogger(__name__)
 _scheduler_lock = asyncio.Lock()
 CAPTCHA_RETRY_SECONDS = 15
+DEAD_STOCK_DAYS = 90
 
 
 def _get_price_change_limit(product: Product) -> float:
@@ -40,6 +42,54 @@ def _get_price_change_limit(product: Product) -> float:
     if value is None:
         return float(settings.AI_PRICE_CHANGE_LIMIT_DEFAULT)
     return float(value)
+
+
+def _get_inventory_base_date(product: Product) -> datetime.datetime | None:
+    """
+    악성재고 판정 기준일을 가져온다.
+    실제 입고일 컬럼이 있으면 그 값을 우선 사용하고,
+    현재 모델에 입고일이 없다면 상품 생성일(created_at/c_date)을 보조 기준으로 사용한다.
+    """
+    for attr in (
+        "stock_received_at",
+        "last_stocked_at",
+        "received_at",
+        "created_at",
+        "c_date",
+    ):
+        value = getattr(product, attr, None)
+        if value is None:
+            continue
+
+        if isinstance(value, datetime.datetime):
+            return value
+
+        if isinstance(value, datetime.date):
+            return datetime.datetime.combine(value, datetime.time.min)
+
+    return None
+
+
+def _is_dead_stock(product: Product) -> bool:
+    """
+    악성재고 여부
+    - 기준: 재고 기준일로부터 90일 이상 경과
+    """
+    base_date = _get_inventory_base_date(product)
+    if base_date is None:
+        return False
+
+    now = now_kst()
+
+    # timezone aware/naive 혼용으로 인한 TypeError 방지
+    if base_date.tzinfo is not None and now.tzinfo is None:
+        base_date = base_date.replace(tzinfo=None)
+    elif base_date.tzinfo is None and now.tzinfo is not None:
+        now = now.replace(tzinfo=None)
+
+    return now - base_date >= datetime.timedelta(days=DEAD_STOCK_DAYS)
+
+
 
 
 def _get_market_info(
@@ -99,7 +149,11 @@ def _build_ai_history_reason(
         applied_price: int,
         stock_qty: int,
         safety_stock_qty: int,
+        is_dead_stock: bool = False,
     ) -> str:
+        if is_dead_stock and applied_price <= previous_price:
+            return "악성재고(90일 이상) 가격인하"
+
         if safety_stock_qty > 0 and stock_qty >= safety_stock_qty * 2:
             if applied_price <= previous_price:
                 return "악성재고 가격인하"
@@ -171,6 +225,7 @@ def _build_history_row(
             applied_price=applied_price,
             stock_qty=int(product.stock_qty or 0),
             safety_stock_qty=int(product.safety_stock_qty or 0),
+            is_dead_stock=_is_dead_stock(product),
         ),
 
         created_at=now,
@@ -208,6 +263,7 @@ def _process_one_product(db: Session, product: Product) -> bool:
     max_price_limit = float(max_price_limit_raw)
     current_stock = float(getattr(product, "stock_qty"))
     safety_stock = float(getattr(product, "safety_stock_qty"))
+    is_dead_stock = _is_dead_stock(product)
 
     product_code = getattr(product, "product_code", None)
     if not product_code:
@@ -240,6 +296,7 @@ def _process_one_product(db: Session, product: Product) -> bool:
         market_unit_price=float(market_unit_sale_price) if market_unit_sale_price is not None else None,
         catalog_code=external_catalog_id,
         catalog_name=catalog_name,
+        is_dead_stock=is_dead_stock,
     )
 
     # 3) product 가격 반영

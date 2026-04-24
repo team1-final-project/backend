@@ -22,6 +22,7 @@ PRICE_STEP = 100
 SALES_CONVERSION_RATE = 0.5
 HIGH_STOCK_MULTIPLIER = 2.0
 LOW_STOCK_MULTIPLIER = 1.2
+DEAD_STOCK_DAYS = 90
 DEFAULT_CATEGORY_CODE = "50000006"
 
 BRAND_PREFIXES = [
@@ -306,7 +307,18 @@ def generate_price_candidates(
     return sorted(set(candidates))
 
 
-def get_inventory_state(current_stock: float, safety_stock: float) -> str:
+def get_inventory_state(
+    current_stock: float,
+    safety_stock: float,
+    is_dead_stock: bool = False,
+) -> str:
+    """
+    재고 상태 판단
+    - 악성재고(90일 이상 재고)는 재고 수량과 무관하게 재고 많음(high)과 동일하게 취급한다.
+    """
+    if is_dead_stock:
+        return "high"
+
     if current_stock >= safety_stock * HIGH_STOCK_MULTIPLIER:
         return "high"
     if current_stock <= safety_stock * LOW_STOCK_MULTIPLIER:
@@ -443,9 +455,14 @@ def decide_price(
     my_pack_count: int,
     good_id: str,
     recent_ratio: float,
+    is_dead_stock: bool = False,
 ) -> Dict[str, float]:
     max_change = price_change_limit
-    inventory_state = get_inventory_state(current_stock, safety_stock)
+    inventory_state = get_inventory_state(
+        current_stock=current_stock,
+        safety_stock=safety_stock,
+        is_dead_stock=is_dead_stock,
+    )
     cache: Dict[float, Dict[str, float]] = {}
 
     if inventory_state == "high":
@@ -500,7 +517,7 @@ def decide_price(
                 else:
                     final_price = pick_closest_candidate(
                         candidates,
-                        target_price,
+                        target_total_price,
                         prefer="lower",
                     )
 
@@ -622,6 +639,7 @@ def predict_optimal_price(
     catalog_code: Optional[str] = None,
     catalog_name: Optional[str] = None,
     category_code: str = DEFAULT_CATEGORY_CODE,
+    is_dead_stock: bool = False,
 ) -> Dict:
     """
     가격 결정 메인 함수
@@ -649,6 +667,7 @@ def predict_optimal_price(
         my_pack_count=my_pack_count,
         good_id=good_id,
         recent_ratio=recent_ratio,
+        is_dead_stock=is_dead_stock,
     )
 
     changed_price = float(chosen["price"])
