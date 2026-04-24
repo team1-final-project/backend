@@ -87,7 +87,7 @@ def _is_dead_stock(product: Product) -> bool:
     elif base_date.tzinfo is None and now.tzinfo is not None:
         now = now.replace(tzinfo=None)
 
-    return now - base_date >= datetime.timedelta(days=DEAD_STOCK_DAYS)
+    return now - base_date > datetime.timedelta(days=DEAD_STOCK_DAYS)
 
 
 
