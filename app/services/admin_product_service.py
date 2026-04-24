@@ -1090,8 +1090,17 @@ class AdminProductService:
             purchase_price = int(product.cost_price or 0)
             asset_amount = available_stock * purchase_price
 
+            storage_days = 0
+            today = now_kst().date()
+
+            storage_days = 0
+            if product.created_at:
+                storage_days = (today - product.created_at.date()).days
+
             if available_stock <= 0:
                 inventory_status = "일시품절"
+            elif available_stock > 0 and storage_days > 90:
+                inventory_status = "악성재고"
             elif available_stock <= safety_stock_qty:
                 inventory_status = "발주권고"
             else:
