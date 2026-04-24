@@ -324,15 +324,9 @@ class AdminProductService:
             pack_count=pack_count,
             sale_status=payload.sale_status,
             ai_pricing_enabled=payload.ai_pricing_enabled,
-            min_price_limit=(
-                payload.min_price_limit if payload.ai_pricing_enabled else None
-            ),
-            max_price_limit=(
-                payload.max_price_limit if payload.ai_pricing_enabled else None
-            ),
-            price_per_time=(
-                payload.price_per_time if payload.ai_pricing_enabled else None
-            ),
+            min_price_limit=payload.min_price_limit,
+            max_price_limit=payload.max_price_limit,
+            price_per_time=payload.price_per_time,
             stock_qty=payload.stock_qty,
             safety_stock_qty=payload.safety_stock_qty,
             expiration_date=payload.expiration_date,
@@ -827,15 +821,9 @@ class AdminProductService:
         product.pack_count = pack_count
         product.sale_status = payload.sale_status
         product.ai_pricing_enabled = payload.ai_pricing_enabled
-        product.min_price_limit = (
-            payload.min_price_limit if payload.ai_pricing_enabled else None
-        )
-        product.max_price_limit = (
-            payload.max_price_limit if payload.ai_pricing_enabled else None
-        )
-        product.price_per_time = (
-            payload.price_per_time if payload.ai_pricing_enabled else None
-        )
+        product.min_price_limit = payload.min_price_limit
+        product.max_price_limit = payload.max_price_limit
+        product.price_per_time = payload.price_per_time
         product.safety_stock_qty = payload.safety_stock_qty
         product.expiration_date = payload.expiration_date
         product.shipping_fee = payload.shipping_fee
@@ -1333,10 +1321,6 @@ class AdminProductService:
             )
 
         product.ai_pricing_enabled = ai_pricing_enabled
-
-        if not ai_pricing_enabled:
-            product.min_price_limit = None
-            product.max_price_limit = None
 
         db.add(product)
         db.commit()
